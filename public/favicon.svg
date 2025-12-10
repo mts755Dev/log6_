@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#09c2af"/>
+      <stop offset="100%" style="stop-color:#087d74"/>
+    </linearGradient>
+  </defs>
+  <rect width="100" height="100" rx="20" fill="url(#grad)"/>
+  <!-- Battery outline -->
+  <rect x="28" y="22" width="44" height="58" rx="6" fill="none" stroke="white" stroke-width="4"/>
+  <!-- Battery cap -->
+  <rect x="40" y="14" width="20" height="8" rx="3" fill="white"/>
+  <!-- Solar rays / charge indicator -->
+  <circle cx="50" cy="51" r="14" fill="white" opacity="0.9"/>
+  <path d="M50 32 L53 45 L62 45 L55 55 L58 68 L50 58 L42 68 L45 55 L38 45 L47 45 Z" fill="#f59e0b"/>
+</svg>
