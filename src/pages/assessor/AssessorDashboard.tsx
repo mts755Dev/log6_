@@ -29,14 +29,14 @@ export function AssessorDashboard() {
   return (
     <div className="space-y-8">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="page-header mb-0">
           <h1 className="page-title">Assessor Dashboard</h1>
           <p className="page-subtitle">Umbrella scheme review and approval</p>
         </div>
         {pendingReviews.length > 0 && (
-          <Link to="/assessor/pending">
-            <Button leftIcon={<Eye className="w-4 h-4" />}>
+          <Link to="/assessor/pending" className="w-full sm:w-auto">
+            <Button leftIcon={<Eye className="w-4 h-4" />} className="w-full sm:w-auto justify-center">
               Review Pending ({pendingReviews.length})
             </Button>
           </Link>
@@ -110,12 +110,12 @@ export function AssessorDashboard() {
                       <p className="text-sm text-slate-500">
                         {commission.systemDetails.batteryModel} • {commission.systemDetails.capacityKwh}kWh
                       </p>
-                      <div className="flex items-center gap-4 mt-3 text-xs text-slate-500">
+                      <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-3 text-xs text-slate-500">
                         <span>Installer: {commission.installerName}</span>
-                        <span>•</span>
+                        <span className="hidden sm:inline">•</span>
                         <span>Company: {commission.companyName}</span>
-                        <span>•</span>
-                        <span>Submitted: {format(new Date(commission.submittedAt), 'dd MMM yyyy')}</span>
+                        <span className="hidden sm:inline">•</span>
+                        <span>Submitted: {format(new Date(commission.submittedAt), 'dd MMM')}</span>
                       </div>
                     </div>
                     <Link

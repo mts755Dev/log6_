@@ -249,7 +249,9 @@ export function AdminDashboard() {
           <h3 className="section-title mb-0">Recent Quotes</h3>
           <button className="text-sm text-primary-400 hover:text-primary-300">View all quotes</button>
         </div>
-        <div className="overflow-x-auto">
+        
+        {/* Desktop Table View */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="table">
             <thead>
               <tr>
@@ -278,6 +280,30 @@ export function AdminDashboard() {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Card View */}
+        <div className="md:hidden space-y-3">
+          {quotes.slice(0, 5).map((quote) => (
+            <div key={quote.id} className="p-4 bg-slate-800/30 rounded-xl">
+              <div className="flex items-start justify-between mb-2">
+                <div>
+                  <p className="font-medium text-white">{quote.customer.name}</p>
+                  <p className="text-xs text-slate-500">
+                    {companies.find(c => c.id === quote.companyId)?.name || 'Unknown'}
+                  </p>
+                </div>
+                <QuoteStatusBadge status={quote.status} />
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-mono text-primary-400">{quote.reference}</span>
+                <span className="font-medium text-white">£{quote.total.toLocaleString()}</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-2">
+                {format(new Date(quote.createdAt), 'dd MMM yyyy')}
+              </p>
+            </div>
+          ))}
         </div>
       </Card>
     </div>

@@ -56,13 +56,13 @@ export function InstallerDashboard() {
   return (
     <div className="space-y-8">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="page-header mb-0">
           <h1 className="page-title">Welcome back, {user?.name.split(' ')[0]}</h1>
           <p className="page-subtitle">{user?.companyName}</p>
         </div>
-        <Link to="/installer/quotes/new">
-          <Button leftIcon={<Plus className="w-4 h-4" />}>
+        <Link to="/installer/quotes/new" className="w-full sm:w-auto">
+          <Button leftIcon={<Plus className="w-4 h-4" />} className="w-full sm:w-auto justify-center">
             New Quote
           </Button>
         </Link>
@@ -192,53 +192,86 @@ export function InstallerDashboard() {
         </div>
         
         {myQuotes.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Reference</th>
-                  <th>Customer</th>
-                  <th>System</th>
-                  <th>Value</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {myQuotes.slice(0, 5).map((quote) => {
-                  const battery = quote.lineItems.find(li => li.type === 'battery');
-                  return (
-                    <tr key={quote.id}>
-                      <td className="font-mono text-primary-400">{quote.reference}</td>
-                      <td>
-                        <div>
-                          <p className="font-medium text-white">{quote.customer.name}</p>
-                          <p className="text-xs text-slate-500">{quote.customer.postcode}</p>
-                        </div>
-                      </td>
-                      <td className="text-slate-400">
-                        {battery?.description.split(' ').slice(0, 3).join(' ') || 'N/A'}
-                      </td>
-                      <td className="font-medium">£{quote.total.toLocaleString()}</td>
-                      <td><QuoteStatusBadge status={quote.status} /></td>
-                      <td className="text-slate-500">
-                        {format(new Date(quote.createdAt), 'dd MMM')}
-                      </td>
-                      <td>
-                        <Link
-                          to={`/installer/quotes/${quote.id}`}
-                          className="text-sm text-primary-400 hover:text-primary-300"
-                        >
-                          View
-                        </Link>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Reference</th>
+                    <th>Customer</th>
+                    <th>System</th>
+                    <th>Value</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {myQuotes.slice(0, 5).map((quote) => {
+                    const battery = quote.lineItems.find(li => li.type === 'battery');
+                    return (
+                      <tr key={quote.id}>
+                        <td className="font-mono text-primary-400">{quote.reference}</td>
+                        <td>
+                          <div>
+                            <p className="font-medium text-white">{quote.customer.name}</p>
+                            <p className="text-xs text-slate-500">{quote.customer.postcode}</p>
+                          </div>
+                        </td>
+                        <td className="text-slate-400">
+                          {battery?.description.split(' ').slice(0, 3).join(' ') || 'N/A'}
+                        </td>
+                        <td className="font-medium">£{quote.total.toLocaleString()}</td>
+                        <td><QuoteStatusBadge status={quote.status} /></td>
+                        <td className="text-slate-500">
+                          {format(new Date(quote.createdAt), 'dd MMM')}
+                        </td>
+                        <td>
+                          <Link
+                            to={`/installer/quotes/${quote.id}`}
+                            className="text-sm text-primary-400 hover:text-primary-300"
+                          >
+                            View
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Card View */}
+            <div className="md:hidden space-y-3">
+              {myQuotes.slice(0, 5).map((quote) => {
+                const battery = quote.lineItems.find(li => li.type === 'battery');
+                return (
+                  <Link
+                    key={quote.id}
+                    to={`/installer/quotes/${quote.id}`}
+                    className="block p-4 bg-slate-800/50 hover:bg-slate-800 rounded-xl transition-colors"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <p className="font-medium text-white">{quote.customer.name}</p>
+                        <p className="text-xs text-slate-500">{quote.customer.postcode}</p>
+                      </div>
+                      <QuoteStatusBadge status={quote.status} />
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-mono text-primary-400">{quote.reference}</span>
+                      <span className="font-medium text-white">£{quote.total.toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between mt-2 text-xs text-slate-500">
+                      <span>{battery?.description.split(' ').slice(0, 3).join(' ') || 'N/A'}</span>
+                      <span>{format(new Date(quote.createdAt), 'dd MMM')}</span>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </>
         ) : (
           <div className="text-center py-12">
             <FileText className="w-12 h-12 mx-auto mb-4 text-slate-700" />

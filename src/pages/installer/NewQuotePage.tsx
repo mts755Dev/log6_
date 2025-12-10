@@ -256,24 +256,24 @@ export function NewQuotePage() {
   return (
     <div className="max-w-5xl mx-auto">
       {/* Header */}
-      <div className="flex items-center gap-4 mb-8">
-        <button onClick={() => navigate(-1)} className="p-2 hover:bg-slate-800 rounded-lg transition-colors">
+      <div className="flex items-center gap-3 sm:gap-4 mb-6 sm:mb-8">
+        <button onClick={() => navigate(-1)} className="p-2 hover:bg-slate-800 rounded-lg transition-colors shrink-0">
           <ArrowLeft className="w-5 h-5 text-slate-400" />
         </button>
-        <div>
-          <h1 className="page-title">Create New Quote</h1>
-          <p className="page-subtitle">Step {currentStep + 1} of {steps.length}: {steps[currentStep].title}</p>
+        <div className="min-w-0">
+          <h1 className="page-title text-lg sm:text-2xl">Create New Quote</h1>
+          <p className="page-subtitle text-xs sm:text-sm">Step {currentStep + 1} of {steps.length}: {steps[currentStep].title}</p>
         </div>
       </div>
 
       {/* Progress Steps */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between">
+      <div className="mb-6 sm:mb-8 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+        <div className="flex items-center justify-between min-w-max sm:min-w-0">
           {steps.map((step, index) => (
             <div key={step.id} className="flex items-center">
               <button
                 onClick={() => index < currentStep && setCurrentStep(index)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-all ${
+                className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg transition-all ${
                   index === currentStep
                     ? 'bg-primary-600 text-white'
                     : index < currentStep
@@ -281,11 +281,11 @@ export function NewQuotePage() {
                     : 'bg-slate-800/50 text-slate-500'
                 }`}
               >
-                {index < currentStep ? <Check className="w-4 h-4" /> : step.icon}
-                <span className="hidden md:inline text-sm font-medium">{step.title}</span>
+                {index < currentStep ? <Check className="w-4 h-4" /> : <span className="[&>svg]:w-4 [&>svg]:h-4">{step.icon}</span>}
+                <span className="hidden lg:inline text-sm font-medium">{step.title}</span>
               </button>
               {index < steps.length - 1 && (
-                <div className={`w-8 lg:w-16 h-0.5 mx-2 ${
+                <div className={`w-4 sm:w-8 lg:w-16 h-0.5 mx-1 sm:mx-2 ${
                   index < currentStep ? 'bg-success-500' : 'bg-slate-700'
                 }`} />
               )}

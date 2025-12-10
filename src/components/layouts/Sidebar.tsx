@@ -1,5 +1,5 @@
 import { NavLink, useNavigate, Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
   FileText,
@@ -14,7 +14,7 @@ import {
   Calculator,
   FolderOpen,
   Shield,
-  Sun,
+  X,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { useAuth } from '../../contexts/AuthContext';
@@ -26,6 +26,11 @@ interface NavItem {
   path: string;
   icon: React.ReactNode;
   badge?: number;
+}
+
+interface SidebarProps {
+  isOpen: boolean;
+  onClose: () => void;
 }
 
 const navigationConfig: Record<UserRole, NavItem[]> = {
@@ -59,7 +64,7 @@ const navigationConfig: Record<UserRole, NavItem[]> = {
   ],
 };
 
-export function Sidebar() {
+export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -70,6 +75,13 @@ export function Sidebar() {
   const handleLogout = () => {
     logout();
     navigate('/');
+  };
+
+  const handleNavClick = () => {
+    // Close sidebar on mobile when navigating
+    if (window.innerWidth < 1024) {
+      onClose();
+    }
   };
 
   const roleLabels: Record<UserRole, string> = {
@@ -85,82 +97,110 @@ export function Sidebar() {
   };
 
   return (
-    <motion.aside
-      initial={{ x: -280 }}
-      animate={{ x: 0 }}
-      transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="fixed left-0 top-0 h-screen w-64 bg-slate-925 border-r border-slate-800 flex flex-col z-40"
-    >
-      {/* Logo */}
-      <div className="p-5 border-b border-slate-800">
-        <Link to="/">
-          <Logo size="md" variant="light" />
-        </Link>
-      </div>
+    <>
+      {/* Mobile Overlay */}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden"
+            onClick={onClose}
+          />
+        )}
+      </AnimatePresence>
 
-      {/* User Info */}
-      <div className="px-4 py-4 border-b border-slate-800">
-        <div className="flex items-center gap-3 px-2">
-          <div className={cn(
-            "w-10 h-10 rounded-xl flex items-center justify-center font-semibold text-sm",
-            roleColors[user.role]
-          )}>
-            {user.name.charAt(0).toUpperCase()}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-white truncate">{user.name}</p>
-            <p className="text-xs text-slate-500">{roleLabels[user.role]}</p>
+      {/* Sidebar */}
+      <motion.aside
+        initial={{ x: -280 }}
+        animate={{ x: isOpen ? 0 : -280 }}
+        transition={{ duration: 0.3, ease: 'easeOut' }}
+        className={cn(
+          "fixed left-0 top-0 h-screen w-64 bg-slate-925 border-r border-slate-800 flex flex-col z-50",
+          "lg:translate-x-0 lg:z-40"
+        )}
+      >
+        {/* Logo */}
+        <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+          <Link to="/" onClick={handleNavClick}>
+            <Logo size="md" variant="light" />
+          </Link>
+          {/* Mobile close button */}
+          <button
+            onClick={onClose}
+            className="lg:hidden p-2 -mr-2 text-slate-400 hover:text-white transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* User Info */}
+        <div className="px-4 py-4 border-b border-slate-800">
+          <div className="flex items-center gap-3 px-2">
+            <div className={cn(
+              "w-10 h-10 rounded-xl flex items-center justify-center font-semibold text-sm",
+              roleColors[user.role]
+            )}>
+              {user.name.charAt(0).toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white truncate">{user.name}</p>
+              <p className="text-xs text-slate-500">{roleLabels[user.role]}</p>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 overflow-y-auto">
-        <ul className="space-y-1">
-          {navigation.map((item) => (
-            <li key={item.path}>
-              <NavLink
-                to={item.path}
-                end={item.path === '/admin' || item.path === '/installer' || item.path === '/assessor' || item.path === '/installer/quotes'}
-                className={({ isActive }) =>
-                  cn('sidebar-link group', isActive && 'sidebar-link-active')
-                }
-              >
-                {item.icon}
-                <span className="flex-1 font-medium">{item.label}</span>
-                {item.badge && item.badge > 0 && (
-                  <span className="px-2 py-0.5 text-xs bg-primary-600 text-white rounded-full font-semibold">
-                    {item.badge}
-                  </span>
-                )}
-                <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-50 transition-opacity" />
-              </NavLink>
-            </li>
-          ))}
-        </ul>
-      </nav>
+        {/* Navigation */}
+        <nav className="flex-1 px-3 py-4 overflow-y-auto">
+          <ul className="space-y-1">
+            {navigation.map((item) => (
+              <li key={item.path}>
+                <NavLink
+                  to={item.path}
+                  end={item.path === '/admin' || item.path === '/installer' || item.path === '/assessor' || item.path === '/installer/quotes'}
+                  onClick={handleNavClick}
+                  className={({ isActive }) =>
+                    cn('sidebar-link group', isActive && 'sidebar-link-active')
+                  }
+                >
+                  {item.icon}
+                  <span className="flex-1 font-medium">{item.label}</span>
+                  {item.badge && item.badge > 0 && (
+                    <span className="px-2 py-0.5 text-xs bg-primary-600 text-white rounded-full font-semibold">
+                      {item.badge}
+                    </span>
+                  )}
+                  <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-50 transition-opacity" />
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        </nav>
 
-      {/* Company Info (for installers) */}
-      {user.role === 'installer' && (
-        <div className="px-5 py-3 border-t border-slate-800">
-          <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-            <Building2 className="w-3.5 h-3.5" />
-            <span>Company</span>
+        {/* Company Info (for installers) */}
+        {user.role === 'installer' && (
+          <div className="px-5 py-3 border-t border-slate-800">
+            <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
+              <Building2 className="w-3.5 h-3.5" />
+              <span>Company</span>
+            </div>
+            <p className="text-sm text-slate-300 truncate font-medium">{user.companyName}</p>
           </div>
-          <p className="text-sm text-slate-300 truncate font-medium">{user.companyName}</p>
-        </div>
-      )}
+        )}
 
-      {/* Logout */}
-      <div className="p-4 border-t border-slate-800">
-        <button
-          onClick={handleLogout}
-          className="sidebar-link w-full text-red-400 hover:text-red-300 hover:bg-red-500/10"
-        >
-          <LogOut className="sidebar-icon" />
-          <span className="font-medium">Sign Out</span>
-        </button>
-      </div>
-    </motion.aside>
+        {/* Logout */}
+        <div className="p-4 border-t border-slate-800">
+          <button
+            onClick={handleLogout}
+            className="sidebar-link w-full text-red-400 hover:text-red-300 hover:bg-red-500/10"
+          >
+            <LogOut className="sidebar-icon" />
+            <span className="font-medium">Sign Out</span>
+          </button>
+        </div>
+      </motion.aside>
+    </>
   );
 }
