@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 import { cn } from '../../utils/cn';
 
-interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onAnimationStart' | 'onAnimationEnd' | 'onDrag' | 'onDragStart' | 'onDragEnd'> {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'success' | 'solar';
   size?: 'sm' | 'md' | 'lg';
   isLoading?: boolean;
@@ -26,7 +26,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref
   ) => {
-    const variants = {
+    const variantStyles = {
       primary:
         'bg-primary-600 hover:bg-primary-700 text-white shadow-lg shadow-primary-600/20 hover:shadow-primary-600/30',
       secondary:
@@ -53,7 +53,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         className={cn(
           'inline-flex items-center justify-center gap-2 font-semibold rounded-lg transition-all duration-200',
           'disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none',
-          variants[variant],
+          variantStyles[variant],
           sizes[size],
           className
         )}
