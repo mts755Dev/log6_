@@ -7,19 +7,33 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Solar/Energy Primary - Deep Teal/Green
+        // Primary - Cyan Blue (#3fc0eb)
         primary: {
-          50: '#effefb',
-          100: '#c9fef4',
-          200: '#93fdea',
-          300: '#55f3dc',
-          400: '#22dec9',
-          500: '#09c2af',
-          600: '#049d8f',
-          700: '#087d74',
-          800: '#0c635d',
-          900: '#0f524d',
-          950: '#013331',
+          50: '#edfbfe',
+          100: '#d2f4fc',
+          200: '#abeaf9',
+          300: '#72dcf4',
+          400: '#3fc0eb',
+          500: '#1aa8d6',
+          600: '#1288b5',
+          700: '#146d93',
+          800: '#185a78',
+          900: '#194b65',
+          950: '#0a3144',
+        },
+        // Secondary - Charcoal (#444342)
+        charcoal: {
+          50: '#f6f6f5',
+          100: '#e7e6e6',
+          200: '#d1d0cf',
+          300: '#b1afae',
+          400: '#898786',
+          500: '#6e6c6b',
+          600: '#5e5c5b',
+          700: '#504f4e',
+          800: '#444342',
+          900: '#3c3b3a',
+          950: '#262525',
         },
         // Solar Accent - Warm Amber/Orange
         solar: {
@@ -49,7 +63,7 @@ export default {
           900: '#14532d',
           950: '#052e16',
         },
-        // Professional Navy/Slate
+        // Professional Slate
         slate: {
           50: '#f8fafc',
           100: '#f1f5f9',
@@ -96,17 +110,17 @@ export default {
         mono: ['JetBrains Mono', 'monospace'],
       },
       boxShadow: {
-        'glow': '0 0 20px rgba(9, 194, 175, 0.15)',
-        'glow-lg': '0 0 40px rgba(9, 194, 175, 0.2)',
+        'glow': '0 0 20px rgba(63, 192, 235, 0.15)',
+        'glow-lg': '0 0 40px rgba(63, 192, 235, 0.2)',
         'glow-solar': '0 0 30px rgba(245, 158, 11, 0.2)',
         'inner-glow': 'inset 0 1px 0 0 rgba(255, 255, 255, 0.05)',
         'card': '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1)',
         'card-hover': '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
       },
       backgroundImage: {
-        'grid-pattern': 'linear-gradient(rgba(9, 194, 175, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(9, 194, 175, 0.03) 1px, transparent 1px)',
-        'dot-pattern': 'radial-gradient(rgba(9, 194, 175, 0.08) 1px, transparent 1px)',
-        'hero-gradient': 'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(9, 194, 175, 0.15), transparent)',
+        'grid-pattern': 'linear-gradient(rgba(63, 192, 235, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(63, 192, 235, 0.03) 1px, transparent 1px)',
+        'dot-pattern': 'radial-gradient(rgba(63, 192, 235, 0.08) 1px, transparent 1px)',
+        'hero-gradient': 'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(63, 192, 235, 0.15), transparent)',
       },
       backgroundSize: {
         'grid': '60px 60px',
@@ -143,8 +157,8 @@ export default {
           '50%': { transform: 'translateY(-10px)' },
         },
         glow: {
-          '0%': { boxShadow: '0 0 20px rgba(9, 194, 175, 0.2)' },
-          '100%': { boxShadow: '0 0 30px rgba(9, 194, 175, 0.4)' },
+          '0%': { boxShadow: '0 0 20px rgba(63, 192, 235, 0.2)' },
+          '100%': { boxShadow: '0 0 30px rgba(63, 192, 235, 0.4)' },
         },
       },
     },

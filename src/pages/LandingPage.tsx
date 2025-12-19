@@ -85,7 +85,7 @@ const stats = [
 
 const testimonials = [
   {
-    quote: "Log6 has transformed how we quote battery installations. What used to take 30 minutes now takes 2. Our conversion rate has doubled.",
+    quote: "Logi6 has transformed how we quote battery installations. What used to take 30 minutes now takes 2. Our conversion rate has doubled.",
     author: "James Wilson",
     role: "Director, Solar Solutions UK",
     avatar: "JW",
@@ -173,7 +173,7 @@ export function LandingPage() {
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-lg border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <Logo size="md" variant="dark" />
+          <Logo size="md" />
           <nav className="hidden md:flex items-center gap-8">
             <a href="#features" className="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">Features</a>
             <a href="#how-it-works" className="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">How It Works</a>
@@ -300,7 +300,7 @@ export function LandingPage() {
               <span className="gradient-text">Grow Your Business</span>
             </h2>
             <p className="landing-subtitle max-w-2xl mx-auto">
-              From initial quote to final commissioning, Log6 streamlines your entire battery installation workflow.
+              From initial quote to final commissioning, Logi6 streamlines your entire battery installation workflow.
             </p>
           </motion.div>
 
@@ -575,7 +575,7 @@ export function LandingPage() {
               Ready to Power Up<br />Your Business?
             </h2>
             <p className="text-lg text-slate-400 mb-10 max-w-xl mx-auto">
-              Join hundreds of UK installers using Log6 to streamline their battery storage business.
+              Join hundreds of UK installers using Logi6 to streamline their battery storage business.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link to="/login/installer" className="btn-primary px-8 py-4 text-base group">
@@ -596,7 +596,7 @@ export function LandingPage() {
         <div className="max-w-7xl mx-auto px-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-12">
             <div>
-              <Logo size="md" variant="light" />
+              <Logo size="md" />
               <p className="text-slate-400 mt-4 text-sm leading-relaxed">
                 The UK's leading battery storage quoting platform for solar installers.
               </p>
@@ -640,7 +640,7 @@ export function LandingPage() {
           
           <div className="pt-8 border-t border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-sm text-slate-500">
-              © 2025 Log6 Technologies Ltd. All rights reserved.
+              © 2025 Logi6 Technologies Ltd. All rights reserved.
             </p>
             <div className="flex items-center gap-6 text-sm">
               <a href="#" className="text-slate-500 hover:text-slate-300 transition-colors">Privacy Policy</a>

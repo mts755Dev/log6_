@@ -26,11 +26,13 @@
   }
 
   ::selection {
-    @apply bg-primary-500/20 text-primary-900;
+    background-color: rgba(26, 168, 214, 0.2);
+    @apply text-primary-900;
   }
 
   body.dark ::selection {
-    @apply bg-primary-500/30 text-white;
+    background-color: rgba(26, 168, 214, 0.3);
+    @apply text-white;
   }
 
   /* Custom scrollbar */
@@ -68,8 +70,11 @@
   /* Buttons */
   .btn-primary {
     @apply px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-semibold rounded-lg 
-           transition-all duration-200 shadow-lg shadow-primary-600/20 hover:shadow-primary-600/30
-           active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+           transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+    box-shadow: 0 10px 15px -3px rgba(18, 136, 181, 0.2);
+  }
+  .btn-primary:hover {
+    box-shadow: 0 10px 15px -3px rgba(18, 136, 181, 0.3);
   }
 
   .btn-secondary {
@@ -84,36 +89,56 @@
   }
 
   body.dark .btn-ghost {
-    @apply text-slate-300 hover:text-white hover:bg-slate-800/50;
+    @apply text-slate-300 hover:text-white;
+    background-color: transparent;
+  }
+  body.dark .btn-ghost:hover {
+    background-color: rgba(30, 41, 59, 0.5);
   }
 
   .btn-danger {
     @apply px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg 
-           transition-all duration-200 shadow-lg shadow-red-600/20 hover:shadow-red-600/30
-           active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+           transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+    box-shadow: 0 10px 15px -3px rgba(220, 38, 38, 0.2);
+  }
+  .btn-danger:hover {
+    box-shadow: 0 10px 15px -3px rgba(220, 38, 38, 0.3);
   }
 
   .btn-success {
     @apply px-5 py-2.5 bg-energy-600 hover:bg-energy-700 text-white font-semibold rounded-lg 
-           transition-all duration-200 shadow-lg shadow-energy-600/20 hover:shadow-energy-600/30
-           active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+           transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+    box-shadow: 0 10px 15px -3px rgba(22, 163, 74, 0.2);
+  }
+  .btn-success:hover {
+    box-shadow: 0 10px 15px -3px rgba(22, 163, 74, 0.3);
   }
 
   .btn-solar {
     @apply px-5 py-2.5 bg-solar-500 hover:bg-solar-600 text-white font-semibold rounded-lg 
-           transition-all duration-200 shadow-lg shadow-solar-500/20 hover:shadow-solar-500/30
-           active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+           transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+    box-shadow: 0 10px 15px -3px rgba(245, 158, 11, 0.2);
+  }
+  .btn-solar:hover {
+    box-shadow: 0 10px 15px -3px rgba(245, 158, 11, 0.3);
   }
 
   /* Inputs */
   .input {
     @apply w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100
-           placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 
-           focus:border-primary-500 transition-all duration-200;
+           placeholder:text-slate-500 focus:outline-none focus:border-primary-500 transition-all duration-200;
+    --tw-ring-color: rgba(26, 168, 214, 0.5);
+  }
+  .input:focus {
+    box-shadow: 0 0 0 2px rgba(26, 168, 214, 0.5);
   }
 
   .input-error {
-    @apply border-red-500/50 focus:ring-red-500/50 focus:border-red-500;
+    border-color: rgba(239, 68, 68, 0.5);
+    @apply focus:border-red-500;
+  }
+  .input-error:focus {
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.5);
   }
 
   .label {
@@ -122,12 +147,16 @@
 
   /* Cards */
   .card {
-    @apply bg-slate-900/50 backdrop-blur-sm border border-slate-800 rounded-xl p-6
-           shadow-lg shadow-black/10;
+    @apply backdrop-blur-sm border border-slate-800 rounded-xl p-6;
+    background-color: rgba(15, 23, 42, 0.5);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
   }
 
   .card-hover {
-    @apply hover:bg-slate-900/70 hover:border-slate-700 transition-all duration-200 cursor-pointer;
+    @apply hover:border-slate-700 transition-all duration-200 cursor-pointer;
+  }
+  .card-hover:hover {
+    background-color: rgba(15, 23, 42, 0.7);
   }
 
   /* Badges */
@@ -136,23 +165,33 @@
   }
 
   .badge-primary {
-    @apply bg-primary-500/15 text-primary-400 border border-primary-500/25;
+    @apply text-primary-400;
+    background-color: rgba(26, 168, 214, 0.15);
+    border: 1px solid rgba(26, 168, 214, 0.25);
   }
 
   .badge-success {
-    @apply bg-energy-500/15 text-energy-400 border border-energy-500/25;
+    @apply text-energy-400;
+    background-color: rgba(34, 197, 94, 0.15);
+    border: 1px solid rgba(34, 197, 94, 0.25);
   }
 
   .badge-warning {
-    @apply bg-solar-500/15 text-solar-400 border border-solar-500/25;
+    @apply text-solar-400;
+    background-color: rgba(245, 158, 11, 0.15);
+    border: 1px solid rgba(245, 158, 11, 0.25);
   }
 
   .badge-danger {
-    @apply bg-red-500/15 text-red-400 border border-red-500/25;
+    @apply text-red-400;
+    background-color: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.25);
   }
 
   .badge-slate {
-    @apply bg-slate-500/15 text-slate-400 border border-slate-500/25;
+    @apply text-slate-400;
+    background-color: rgba(100, 116, 139, 0.15);
+    border: 1px solid rgba(100, 116, 139, 0.25);
   }
 
   /* Stats */
@@ -170,7 +209,8 @@
 
   /* Tables */
   .table-container {
-    @apply overflow-hidden rounded-xl border border-slate-800 bg-slate-900/50;
+    @apply overflow-hidden rounded-xl border border-slate-800;
+    background-color: rgba(15, 23, 42, 0.5);
   }
 
   .table {
@@ -178,7 +218,8 @@
   }
 
   .table th {
-    @apply px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider bg-slate-900/80;
+    @apply px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider;
+    background-color: rgba(15, 23, 42, 0.8);
   }
 
   .table td {
@@ -186,17 +227,25 @@
   }
 
   .table tbody tr {
-    @apply border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors;
+    @apply transition-colors;
+    border-bottom: 1px solid rgba(30, 41, 59, 0.5);
+  }
+  .table tbody tr:hover {
+    background-color: rgba(30, 41, 59, 0.3);
   }
 
   /* Sidebar */
   .sidebar-link {
-    @apply flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50
+    @apply flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white
            rounded-lg transition-all duration-200;
+  }
+  .sidebar-link:hover {
+    background-color: rgba(30, 41, 59, 0.5);
   }
 
   .sidebar-link-active {
-    @apply text-white bg-primary-600/20 border-l-2 border-primary-500;
+    @apply text-white border-l-2 border-primary-500;
+    background-color: rgba(18, 136, 181, 0.2);
   }
 
   .sidebar-icon {
@@ -267,7 +316,7 @@
   }
 
   .glow {
-    box-shadow: 0 0 20px rgba(9, 194, 175, 0.15);
+    box-shadow: 0 0 20px rgba(63, 192, 235, 0.15);
   }
 
   .glow-solar {
@@ -276,13 +325,13 @@
 
   .bg-grid {
     background-image: 
-      linear-gradient(rgba(9, 194, 175, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(9, 194, 175, 0.03) 1px, transparent 1px);
+      linear-gradient(rgba(63, 192, 235, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(63, 192, 235, 0.03) 1px, transparent 1px);
     background-size: 60px 60px;
   }
 
   .bg-dots {
-    background-image: radial-gradient(rgba(9, 194, 175, 0.06) 1px, transparent 1px);
+    background-image: radial-gradient(rgba(63, 192, 235, 0.06) 1px, transparent 1px);
     background-size: 24px 24px;
   }
 

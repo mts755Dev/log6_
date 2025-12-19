@@ -109,7 +109,7 @@ export function LoginPage() {
         
         <div className="relative z-10 flex flex-col justify-between p-12 w-full">
           <Link to="/">
-            <Logo size="lg" variant="light" />
+            <Logo size="xl" />
           </Link>
           
           <div className="max-w-md">
@@ -153,7 +153,7 @@ export function LoginPage() {
           </div>
 
           <div className="text-sm text-slate-500">
-            © 2025 Log6 Technologies Ltd. All rights reserved.
+            © 2025 Logi6 Technologies Ltd. All rights reserved.
           </div>
         </div>
       </motion.div>
@@ -169,7 +169,7 @@ export function LoginPage() {
           {/* Mobile logo */}
           <div className="lg:hidden mb-8">
             <Link to="/">
-              <Logo size="lg" variant="light" />
+              <Logo size="xl" />
             </Link>
           </div>
 

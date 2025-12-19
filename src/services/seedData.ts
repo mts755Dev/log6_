@@ -278,7 +278,7 @@ export function initializeSeedData(): void {
   const companies: Company[] = [
     {
       id: 'comp-admin',
-      name: 'Log6 Platform',
+      name: 'Logi6 Platform',
       email: 'admin@log6.co.uk',
       phone: '020 7123 4567',
       address: '1 Platform Way',
@@ -326,7 +326,7 @@ export function initializeSeedData(): void {
       name: 'Platform Admin',
       role: 'admin',
       companyId: 'comp-admin',
-      companyName: 'Log6 Platform',
+      companyName: 'Logi6 Platform',
       createdAt: new Date().toISOString(),
       lastLogin: new Date().toISOString(),
       isActive: true,
@@ -359,7 +359,7 @@ export function initializeSeedData(): void {
       name: 'Michael Brown',
       role: 'assessor',
       companyId: 'comp-admin',
-      companyName: 'Log6 Platform',
+      companyName: 'Logi6 Platform',
       createdAt: new Date().toISOString(),
       lastLogin: new Date().toISOString(),
       isActive: true,

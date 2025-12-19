@@ -1,4 +1,4 @@
-# Log6 - Battery Storage Quoting Platform
+# Logi6 - Battery Storage Quoting Platform
 
 A professional SaaS platform for the UK battery storage market, enabling renewable installers and electricians to generate instant quotes, model customer ROI, and automate compliance paperwork.
 
@@ -66,7 +66,7 @@ A professional SaaS platform for the UK battery storage market, enabling renewab
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd Log6_
+cd Logi6_
 
 # Install dependencies
 npm install
@@ -172,5 +172,5 @@ npm run lint     # Run ESLint
 
 ## License
 
-Proprietary - © 2025 Log6 Technologies Ltd. All rights reserved.
+Proprietary - © 2025 Logi6 Technologies Ltd. All rights reserved.
 
