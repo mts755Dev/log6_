@@ -22,7 +22,7 @@ const roleConfig: Record<UserRole, {
     icon: <Shield className="w-6 h-6" />,
     color: 'text-primary-500',
     bgColor: 'bg-primary-500/10',
-    demoEmail: 'admin@log6.co.uk',
+    demoEmail: 'admin@helios.co.uk',
   },
   installer: {
     title: 'Installer Portal',
@@ -38,7 +38,7 @@ const roleConfig: Record<UserRole, {
     icon: <Users className="w-6 h-6" />,
     color: 'text-solar-500',
     bgColor: 'bg-solar-500/10',
-    demoEmail: 'assessor@log6.co.uk',
+    demoEmail: 'assessor@helios.co.uk',
   },
 };
 
@@ -109,7 +109,7 @@ export function LoginPage() {
         
         <div className="relative z-10 flex flex-col justify-between p-12 w-full">
           <Link to="/">
-            <Logo size="xl" />
+            <Logo size="xl" variant="dark" />
           </Link>
           
           <div className="max-w-md">
@@ -153,7 +153,7 @@ export function LoginPage() {
           </div>
 
           <div className="text-sm text-slate-500">
-            © 2025 Logi6 Technologies Ltd. All rights reserved.
+            © 2025 heliOS Technologies Ltd. All rights reserved.
           </div>
         </div>
       </motion.div>

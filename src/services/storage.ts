@@ -1,18 +1,18 @@
 // LocalStorage Service for persisting data
 
 const STORAGE_KEYS = {
-  USERS: 'log6_users',
-  COMPANIES: 'log6_companies',
-  QUOTES: 'log6_quotes',
-  PRODUCTS_BATTERIES: 'log6_batteries',
-  PRODUCTS_INVERTERS: 'log6_inverters',
-  MANUFACTURERS: 'log6_manufacturers',
-  MIS_DOCUMENTS: 'log6_mis_documents',
-  COMMISSIONS: 'log6_commissions',
-  CERTIFICATES: 'log6_certificates',
-  NOTIFICATIONS: 'log6_notifications',
-  CURRENT_USER: 'log6_current_user',
-  INITIALIZED: 'log6_initialized',
+  USERS: 'helios_users',
+  COMPANIES: 'helios_companies',
+  QUOTES: 'helios_quotes',
+  PRODUCTS_BATTERIES: 'helios_batteries',
+  PRODUCTS_INVERTERS: 'helios_inverters',
+  MANUFACTURERS: 'helios_manufacturers',
+  MIS_DOCUMENTS: 'helios_mis_documents',
+  COMMISSIONS: 'helios_commissions',
+  CERTIFICATES: 'helios_certificates',
+  NOTIFICATIONS: 'helios_notifications',
+  CURRENT_USER: 'helios_current_user',
+  INITIALIZED: 'helios_initialized',
 };
 
 // Generic storage functions

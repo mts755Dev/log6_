@@ -84,7 +84,7 @@ export async function generateQuotePDF(quote: Quote, companyName: string): Promi
   yPos = 25;
 
   // Logo and Company
-  text('Logi6', margin, yPos, { size: 28, color: colors.primaryDark, bold: true });
+  text('heliOS', margin, yPos, { size: 28, color: colors.primaryDark, bold: true });
   text('Battery Storage Solutions', margin, yPos + 8, { size: 10, color: colors.muted });
 
   // Quote reference badge
@@ -211,7 +211,7 @@ export async function generateQuotePDF(quote: Quote, companyName: string): Promi
   const footerY = pageHeight - 15;
   line(footerY - 8, colors.border);
   text('Page 1 of 2', 0, footerY, { size: 8, color: colors.muted, align: 'center' });
-  text('© 2025 Logi6 Technologies Ltd', pageWidth - margin, footerY, { size: 8, color: colors.muted, align: 'right' });
+  text('© 2025 heliOS Technologies Ltd', pageWidth - margin, footerY, { size: 8, color: colors.muted, align: 'right' });
 
   // ============================================================
   // PAGE 2: DETAILED BREAKDOWN
@@ -225,7 +225,7 @@ export async function generateQuotePDF(quote: Quote, companyName: string): Promi
   yPos = 25;
 
   // Header
-  text('Logi6', margin, yPos, { size: 16, color: colors.primaryDark, bold: true });
+  text('heliOS', margin, yPos, { size: 16, color: colors.primaryDark, bold: true });
   text(quote.reference, pageWidth - margin, yPos, { size: 11, color: colors.muted, align: 'right' });
 
   yPos = 45;
@@ -367,7 +367,7 @@ export async function generateQuotePDF(quote: Quote, companyName: string): Promi
   const footer2Y = pageHeight - 15;
   line(footer2Y - 8, colors.border);
   text('Page 2 of 2', 0, footer2Y, { size: 8, color: colors.muted, align: 'center' });
-  text('© 2025 Logi6 Technologies Ltd', pageWidth - margin, footer2Y, { size: 8, color: colors.muted, align: 'right' });
+  text('© 2025 heliOS Technologies Ltd', pageWidth - margin, footer2Y, { size: 8, color: colors.muted, align: 'right' });
 
   // Save
   doc.save(`${quote.reference}-Proposal.pdf`);

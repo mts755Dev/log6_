@@ -278,8 +278,8 @@ export function initializeSeedData(): void {
   const companies: Company[] = [
     {
       id: 'comp-admin',
-      name: 'Logi6 Platform',
-      email: 'admin@log6.co.uk',
+      name: 'heliOS Platform',
+      email: 'admin@helios.co.uk',
       phone: '020 7123 4567',
       address: '1 Platform Way',
       postcode: 'EC1A 1BB',
@@ -322,11 +322,11 @@ export function initializeSeedData(): void {
   const users: User[] = [
     {
       id: 'user-admin',
-      email: 'admin@log6.co.uk',
+      email: 'admin@helios.co.uk',
       name: 'Platform Admin',
       role: 'admin',
       companyId: 'comp-admin',
-      companyName: 'Logi6 Platform',
+      companyName: 'heliOS Platform',
       createdAt: new Date().toISOString(),
       lastLogin: new Date().toISOString(),
       isActive: true,
@@ -355,11 +355,11 @@ export function initializeSeedData(): void {
     },
     {
       id: 'user-assessor',
-      email: 'assessor@log6.co.uk',
+      email: 'assessor@helios.co.uk',
       name: 'Michael Brown',
       role: 'assessor',
       companyId: 'comp-admin',
-      companyName: 'Logi6 Platform',
+      companyName: 'heliOS Platform',
       createdAt: new Date().toISOString(),
       lastLogin: new Date().toISOString(),
       isActive: true,

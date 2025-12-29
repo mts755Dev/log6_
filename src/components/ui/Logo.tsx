@@ -2,9 +2,10 @@ import { motion } from 'framer-motion';
 
 interface LogoProps {
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'auto';
+  variant?: 'light' | 'dark';
 }
 
-export function Logo({ size = 'md' }: LogoProps) {
+export function Logo({ size = 'md', variant = 'light' }: LogoProps) {
   // 'auto' means no size constraint - use original image size
   if (size === 'auto') {
     return (
@@ -15,8 +16,8 @@ export function Logo({ size = 'md' }: LogoProps) {
         transition={{ duration: 0.3 }}
       >
         <img 
-          src="/assets/Logi6 Logo.png" 
-          alt="Logi6 Logo"
+          src={variant === 'light' ? "/assets/Main heliOS Logo.png" : "/assets/White heliOS Logo.png"} 
+          alt="heliOS Logo"
           className="object-contain"
         />
       </motion.div>
@@ -40,8 +41,8 @@ export function Logo({ size = 'md' }: LogoProps) {
       transition={{ duration: 0.3 }}
     >
       <img 
-        src="/assets/Logi6 Logo.png" 
-        alt="Logi6 Logo"
+        src={variant === 'light' ? "/assets/Main heliOS Logo.png" : "/assets/White heliOS Logo.png"} 
+        alt="heliOS Logo"
         style={{ width: icon, height: 'auto' }}
         className="object-contain"
       />

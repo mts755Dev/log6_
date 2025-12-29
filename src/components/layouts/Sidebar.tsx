@@ -125,7 +125,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         {/* Logo */}
         <div className="p-5 border-b border-slate-800 flex items-center justify-between">
           <Link to="/" onClick={handleNavClick}>
-            <Logo size="md" />
+            <Logo size="md" variant="dark" />
           </Link>
           {/* Mobile close button */}
           <button

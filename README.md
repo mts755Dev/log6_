@@ -1,4 +1,4 @@
-# Logi6 - Battery Storage Quoting Platform
+# heliOS - Battery Storage Quoting Platform
 
 A professional SaaS platform for the UK battery storage market, enabling renewable installers and electricians to generate instant quotes, model customer ROI, and automate compliance paperwork.
 
@@ -66,7 +66,7 @@ A professional SaaS platform for the UK battery storage market, enabling renewab
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd Logi6_
+cd heliOS_
 
 # Install dependencies
 npm install
@@ -83,9 +83,9 @@ The platform comes with pre-seeded demo accounts for testing:
 
 | Role | Email | Portal URL |
 |------|-------|------------|
-| Admin | admin@log6.co.uk | /login/admin |
+| Admin | admin@helios.co.uk | /login/admin |
 | Installer | installer@solarsolutions.co.uk | /login/installer |
-| Assessor | assessor@log6.co.uk | /login/assessor |
+| Assessor | assessor@helios.co.uk | /login/assessor |
 
 Simply enter the email and click "Try Demo Account" to log in.
 
@@ -172,5 +172,5 @@ npm run lint     # Run ESLint
 
 ## License
 
-Proprietary - © 2025 Logi6 Technologies Ltd. All rights reserved.
+Proprietary - © 2025 heliOS Technologies Ltd. All rights reserved.
 

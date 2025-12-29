@@ -26,12 +26,12 @@
   }
 
   ::selection {
-    background-color: rgba(26, 168, 214, 0.2);
+    background-color: rgba(251, 213, 25, 0.2);
     @apply text-primary-900;
   }
 
   body.dark ::selection {
-    background-color: rgba(26, 168, 214, 0.3);
+    background-color: rgba(251, 213, 25, 0.3);
     @apply text-white;
   }
 
@@ -71,10 +71,10 @@
   .btn-primary {
     @apply px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-semibold rounded-lg 
            transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
-    box-shadow: 0 10px 15px -3px rgba(18, 136, 181, 0.2);
+    box-shadow: 0 10px 15px -3px rgba(234, 179, 8, 0.2);
   }
   .btn-primary:hover {
-    box-shadow: 0 10px 15px -3px rgba(18, 136, 181, 0.3);
+    box-shadow: 0 10px 15px -3px rgba(234, 179, 8, 0.3);
   }
 
   .btn-secondary {
@@ -127,10 +127,10 @@
   .input {
     @apply w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100
            placeholder:text-slate-500 focus:outline-none focus:border-primary-500 transition-all duration-200;
-    --tw-ring-color: rgba(26, 168, 214, 0.5);
+    --tw-ring-color: rgba(251, 213, 25, 0.5);
   }
   .input:focus {
-    box-shadow: 0 0 0 2px rgba(26, 168, 214, 0.5);
+    box-shadow: 0 0 0 2px rgba(251, 213, 25, 0.5);
   }
 
   .input-error {
@@ -166,8 +166,8 @@
 
   .badge-primary {
     @apply text-primary-400;
-    background-color: rgba(26, 168, 214, 0.15);
-    border: 1px solid rgba(26, 168, 214, 0.25);
+    background-color: rgba(251, 213, 25, 0.15);
+    border: 1px solid rgba(251, 213, 25, 0.25);
   }
 
   .badge-success {
@@ -245,7 +245,7 @@
 
   .sidebar-link-active {
     @apply text-white border-l-2 border-primary-500;
-    background-color: rgba(18, 136, 181, 0.2);
+    background-color: rgba(251, 213, 25, 0.1);
   }
 
   .sidebar-icon {
@@ -316,7 +316,7 @@
   }
 
   .glow {
-    box-shadow: 0 0 20px rgba(63, 192, 235, 0.15);
+    box-shadow: 0 0 20px rgba(251, 213, 25, 0.15);
   }
 
   .glow-solar {
@@ -325,13 +325,13 @@
 
   .bg-grid {
     background-image: 
-      linear-gradient(rgba(63, 192, 235, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(63, 192, 235, 0.03) 1px, transparent 1px);
+      linear-gradient(rgba(251, 213, 25, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(251, 213, 25, 0.03) 1px, transparent 1px);
     background-size: 60px 60px;
   }
 
   .bg-dots {
-    background-image: radial-gradient(rgba(63, 192, 235, 0.06) 1px, transparent 1px);
+    background-image: radial-gradient(rgba(251, 213, 25, 0.06) 1px, transparent 1px);
     background-size: 24px 24px;
   }
 

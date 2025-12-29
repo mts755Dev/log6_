@@ -71,7 +71,7 @@ export function DashboardLayout({ requiredRole }: DashboardLayoutProps) {
           <Menu className="w-6 h-6" />
         </button>
         <Link to="/">
-          <Logo size="sm" />
+          <Logo size="sm" variant="dark" />
         </Link>
         <div className="w-10" /> {/* Spacer for centering */}
       </header>
