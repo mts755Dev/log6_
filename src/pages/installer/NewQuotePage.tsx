@@ -221,7 +221,7 @@ export function NewQuotePage() {
       }
 
       const quoteData: Omit<Quote, 'id' | 'createdAt' | 'updatedAt'> = {
-        companyId: user.companyId,
+        companyId: user.companyId || '',
         installerId: user.id,
         installerName: user.name,
         reference: `QT-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`,

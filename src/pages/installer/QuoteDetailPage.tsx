@@ -49,7 +49,7 @@ export function QuoteDetailPage() {
     if (!quote || !user) return;
     setIsExporting(true);
     try {
-      await generateQuotePDF(quote, user.companyName);
+      await generateQuotePDF(quote, user.companyName || 'heliOS Platform');
     } catch (error) {
       console.error('Error generating PDF:', error);
     } finally {
