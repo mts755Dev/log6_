@@ -8,6 +8,7 @@ import {
   removeFromCollection,
   findInCollection,
 } from '../services/storage';
+import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import type {
   Quote,
@@ -80,8 +81,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [certificates, setCertificates] = useState<Certificate[]>([]);
   const [misDocuments, setMisDocuments] = useState<MIS3002Document[]>([]);
 
-  const loadData = useCallback(() => {
-    // Load all data based on user role
+  const loadData = useCallback(async () => {
+    // Load quotes and commissions from localStorage (will migrate to Supabase later)
     const allQuotes = getCollection<Quote>(STORAGE_KEYS.QUOTES);
     const allCommissions = getCollection<CommissioningSubmission>(STORAGE_KEYS.COMMISSIONS);
     
@@ -99,11 +100,133 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       setCommissions(allCommissions);
     }
     
-    setCompanies(getCollection<Company>(STORAGE_KEYS.COMPANIES));
+    // Load companies from Supabase
+    try {
+      const { data: companiesData, error: companiesError } = await supabase
+        .from('companies')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!companiesError && companiesData) {
+        const mappedCompanies: Company[] = companiesData.map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          email: c.email,
+          phone: c.phone || '',
+          address: c.address || '',
+          postcode: c.postcode || '',
+          mcsNumber: c.mcs_number,
+          isUmbrellaScheme: c.is_umbrella_scheme,
+          subscriptionTier: c.subscription_tier,
+          subscriptionStatus: c.subscription_status,
+          subscriptionEndDate: c.subscription_end_date,
+          logo: c.logo,
+          brandColor: c.brand_color,
+          createdAt: c.created_at,
+        }));
+        setCompanies(mappedCompanies);
+      }
+    } catch (error) {
+      console.error('Error loading companies:', error);
+    }
+
+    // Load manufacturers from Supabase
+    try {
+      const { data: mfrData, error: mfrError } = await supabase
+        .from('manufacturers')
+        .select('*')
+        .eq('is_active', true)
+        .order('name');
+
+      if (!mfrError && mfrData) {
+        const mappedMfrs: Manufacturer[] = mfrData.map((m: any) => ({
+          id: m.id,
+          name: m.name,
+          logo: m.logo,
+          website: m.website,
+          supportEmail: m.support_email,
+          isActive: m.is_active,
+        }));
+        setManufacturers(mappedMfrs);
+      }
+    } catch (error) {
+      console.error('Error loading manufacturers:', error);
+    }
+
+    // Load batteries from Supabase
+    try {
+      const { data: batteriesData, error: batteriesError } = await supabase
+        .from('battery_products')
+        .select(`
+          *,
+          manufacturer:manufacturers(id, name)
+        `)
+        .eq('is_active', true)
+        .order('capacity_kwh');
+
+      if (!batteriesError && batteriesData) {
+        const mappedBatteries: BatteryProduct[] = batteriesData.map((b: any) => ({
+          id: b.id,
+          manufacturerId: b.manufacturer_id,
+          manufacturerName: b.manufacturer?.name || 'Unknown',
+          model: b.model,
+          capacityKwh: parseFloat(b.capacity_kwh),
+          powerKw: parseFloat(b.power_kw),
+          chemistry: b.chemistry,
+          warrantyYears: b.warranty_years,
+          cycleLife: b.cycle_life,
+          efficiency: parseFloat(b.efficiency),
+          dimensions: b.dimensions,
+          weight: parseFloat(b.weight),
+          costPrice: parseFloat(b.cost_price),
+          rrp: parseFloat(b.rrp),
+          imageUrl: b.image_url,
+          isActive: b.is_active,
+        }));
+        setBatteries(mappedBatteries);
+      }
+    } catch (error) {
+      console.error('Error loading batteries:', error);
+    }
+
+    // Load inverters from Supabase
+    try {
+      const { data: invertersData, error: invertersError } = await supabase
+        .from('inverter_products')
+        .select(`
+          *,
+          manufacturer:manufacturers(id, name)
+        `)
+        .eq('is_active', true)
+        .order('power_kw');
+
+      if (!invertersError && invertersData) {
+        const mappedInverters: InverterProduct[] = invertersData.map((i: any) => ({
+          id: i.id,
+          manufacturerId: i.manufacturer_id,
+          manufacturerName: i.manufacturer?.name || 'Unknown',
+          model: i.model,
+          powerKw: parseFloat(i.power_kw),
+          type: i.type,
+          mpptCount: i.mppt_count,
+          maxInputVoltage: parseFloat(i.max_input_voltage),
+          maxDcCurrent: i.max_dc_current ? parseFloat(i.max_dc_current) : undefined,
+          efficiency: parseFloat(i.efficiency),
+          warrantyYears: i.warranty_years,
+          dimensions: i.dimensions,
+          weight: parseFloat(i.weight),
+          costPrice: parseFloat(i.cost_price),
+          rrp: parseFloat(i.rrp),
+          imageUrl: i.image_url,
+          isActive: i.is_active,
+        }));
+        setInverters(mappedInverters);
+      }
+    } catch (error) {
+      console.error('Error loading inverters:', error);
+    }
+    
     setUsers(getCollection<User>(STORAGE_KEYS.USERS));
-    setBatteries(getCollection<BatteryProduct>(STORAGE_KEYS.PRODUCTS_BATTERIES));
-    setInverters(getCollection<InverterProduct>(STORAGE_KEYS.PRODUCTS_INVERTERS));
-    setManufacturers(getCollection<Manufacturer>(STORAGE_KEYS.MANUFACTURERS));
     setCertificates(getCollection<Certificate>(STORAGE_KEYS.CERTIFICATES));
     setMisDocuments(getCollection<MIS3002Document>(STORAGE_KEYS.MIS_DOCUMENTS));
   }, [user]);
@@ -275,4 +398,3 @@ export function useData() {
   }
   return context;
 }
-

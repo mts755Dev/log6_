@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { DataProvider } from './contexts/DataContext';
+import { ToastProvider } from './contexts/ToastContext';
 
 // Layouts
 import { DashboardLayout } from './components/layouts/DashboardLayout';
@@ -8,6 +9,7 @@ import { DashboardLayout } from './components/layouts/DashboardLayout';
 // Public Pages
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/auth/LoginPage';
+import { SignupPage } from './pages/auth/SignupPage';
 
 // Admin Pages
 import { AdminDashboard } from './pages/admin/AdminDashboard';
@@ -36,12 +38,14 @@ import { PlaceholderPage } from './pages/PlaceholderPage';
 function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <DataProvider>
-          <Routes>
+      <ToastProvider>
+        <AuthProvider>
+          <DataProvider>
+            <Routes>
             {/* Public Routes */}
             <Route path="/" element={<LandingPage />} />
             <Route path="/login/:role" element={<LoginPage />} />
+            <Route path="/signup/:role" element={<SignupPage />} />
             
             {/* Admin Routes */}
             <Route path="/admin" element={<DashboardLayout requiredRole="admin" />}>
@@ -81,12 +85,12 @@ function App() {
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </DataProvider>
-      </AuthProvider>
+            </Routes>
+          </DataProvider>
+        </AuthProvider>
+      </ToastProvider>
     </BrowserRouter>
   );
 }
 
 export default App;
-

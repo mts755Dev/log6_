@@ -148,14 +148,7 @@ const portalCards = [
     color: 'from-solar-500 to-solar-600',
     features: ['Submission review', 'Photo verification', 'Certificate issuance', 'Quality control'],
   },
-  {
-    role: 'admin',
-    title: 'Admin Portal',
-    description: 'Manage your team, monitor performance, and control product catalogues.',
-    icon: <Shield className="w-7 h-7" />,
-    color: 'from-primary-500 to-primary-600',
-    features: ['Team management', 'Analytics dashboard', 'Product catalogues', 'Billing & subscriptions'],
-  },
+  // Admin portal removed - accessible only via direct URL
 ];
 
 export function LandingPage() {
@@ -392,7 +385,7 @@ export function LandingPage() {
             </p>
           </motion.div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
             {portalCards.map((portal, index) => (
               <motion.div
                 key={portal.role}

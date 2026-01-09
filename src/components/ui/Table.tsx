@@ -73,7 +73,7 @@ export function Table<T>({
             <tr
               key={keyExtractor(item)}
               onClick={() => onRowClick?.(item)}
-              className={cn(onRowClick && 'cursor-pointer')}
+              className={cn(onRowClick && 'cursor-pointer hover:bg-slate-800/50 transition-colors')}
             >
               {columns.map((column) => (
                 <td

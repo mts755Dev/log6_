@@ -6,8 +6,9 @@ export interface User {
   email: string;
   name: string;
   role: UserRole;
-  companyId: string;
-  companyName: string;
+  companyId: string | null;
+  companyName?: string;
+  phone?: string | null;
   createdAt: string;
   lastLogin: string;
   isActive: boolean;
@@ -311,4 +312,6 @@ export interface Notification {
   actionUrl?: string;
   createdAt: string;
 }
+
+
 

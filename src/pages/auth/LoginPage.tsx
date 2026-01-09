@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useParams, Link } from 'react-router-dom';
+import { useNavigate, useParams, Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Mail, Lock, ArrowRight, Shield, Wrench, Users, Sun, Battery, Zap } from 'lucide-react';
+import { Mail, Lock, ArrowRight, Shield, Wrench, Users, Sun, Battery, Zap, CheckCircle2 } from 'lucide-react';
 import { Logo } from '../../components/ui/Logo';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
@@ -14,7 +14,6 @@ const roleConfig: Record<UserRole, {
   icon: React.ReactNode; 
   color: string;
   bgColor: string;
-  demoEmail: string;
 }> = {
   admin: {
     title: 'Admin Portal',
@@ -22,7 +21,6 @@ const roleConfig: Record<UserRole, {
     icon: <Shield className="w-6 h-6" />,
     color: 'text-primary-500',
     bgColor: 'bg-primary-500/10',
-    demoEmail: 'admin@helios.co.uk',
   },
   installer: {
     title: 'Installer Portal',
@@ -30,7 +28,6 @@ const roleConfig: Record<UserRole, {
     icon: <Wrench className="w-6 h-6" />,
     color: 'text-energy-500',
     bgColor: 'bg-energy-500/10',
-    demoEmail: 'installer@solarsolutions.co.uk',
   },
   assessor: {
     title: 'Assessor Portal',
@@ -38,22 +35,35 @@ const roleConfig: Record<UserRole, {
     icon: <Users className="w-6 h-6" />,
     color: 'text-solar-500',
     bgColor: 'bg-solar-500/10',
-    demoEmail: 'assessor@helios.co.uk',
   },
 };
 
 export function LoginPage() {
   const { role } = useParams<{ role: UserRole }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const config = role && roleConfig[role] ? roleConfig[role] : roleConfig.installer;
   const currentRole = role || 'installer';
+
+  // Handle success message from signup
+  useEffect(() => {
+    if (location.state?.message) {
+      setSuccessMessage(location.state.message);
+      if (location.state?.email) {
+        setEmail(location.state.email);
+      }
+      // Clear the state
+      window.history.replaceState({}, document.title);
+    }
+  }, [location]);
 
   // Add dark class to body for dashboard-style login
   useEffect(() => {
@@ -78,19 +88,6 @@ export function LoginPage() {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleDemoLogin = async () => {
-    setEmail(config.demoEmail);
-    setIsLoading(true);
-    
-    const success = await login(config.demoEmail, 'demo', currentRole as UserRole);
-    if (success) {
-      navigate(`/${currentRole}`);
-    } else {
-      setError('Demo login failed. Please try again.');
-    }
-    setIsLoading(false);
   };
 
   return (
@@ -212,6 +209,17 @@ export function LoginPage() {
               required
             />
 
+            {successMessage && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 bg-green-500/10 border border-green-500/30 rounded-xl text-sm text-green-400 flex items-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                {successMessage}
+              </motion.div>
+            )}
+
             {error && (
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
@@ -243,17 +251,16 @@ export function LoginPage() {
             </Button>
           </form>
 
-          {/* Demo Login */}
-          <div className="mt-6 pt-6 border-t border-slate-800">
-            <button
-              onClick={handleDemoLogin}
-              disabled={isLoading}
-              className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl border border-slate-700 transition-colors flex items-center justify-center gap-2"
-            >
-              <span className="text-sm">Try Demo Account</span>
-            </button>
-            <p className="text-xs text-slate-500 text-center mt-3">
-              Explore the platform with demo credentials
+          {/* Sign Up */}
+          <div className="mt-6 text-center">
+            <p className="text-sm text-slate-400">
+              Don't have an account?{' '}
+              <Link
+                to={`/signup/${currentRole}`}
+                className="text-primary-400 hover:text-primary-300 font-semibold transition-colors"
+              >
+                Create Account
+              </Link>
             </p>
           </div>
 
@@ -261,7 +268,9 @@ export function LoginPage() {
           <div className="mt-8 pt-6 border-t border-slate-800">
             <p className="text-sm text-slate-500 text-center mb-4">Switch portal</p>
             <div className="flex justify-center gap-3">
-              {Object.entries(roleConfig).map(([key, value]) => (
+              {Object.entries(roleConfig)
+                .filter(([key]) => key !== 'admin') // Hide admin from portal switcher
+                .map(([key, value]) => (
                 <Link
                   key={key}
                   to={`/login/${key}`}

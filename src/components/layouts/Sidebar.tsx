@@ -72,8 +72,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
   const navigation = navigationConfig[user.role];
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/');
   };
 
