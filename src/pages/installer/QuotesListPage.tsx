@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
@@ -16,14 +16,32 @@ import { Tabs } from '../../components/ui/Tabs';
 import { QuoteStatusBadge } from '../../components/ui/Badge';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../contexts/ToastContext';
 import { format } from 'date-fns';
 
 export function QuotesListPage() {
   const navigate = useNavigate();
+  const toast = useToast();
   const { user } = useAuth();
-  const { quotes, deleteQuote, updateQuote } = useData();
+  const { quotes, deleteQuote, updateQuote, canCreateQuote, deductQuoteCredit, refreshData } = useData();
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('all');
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch fresh data when component mounts
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true);
+      try {
+        await refreshData();
+      } catch (error) {
+        console.error('Error loading quotes:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
+  }, [refreshData]);
 
   const myQuotes = quotes.filter(q => q.companyId === user?.companyId);
 
@@ -45,11 +63,30 @@ export function QuotesListPage() {
     { id: 'rejected', label: 'Rejected', badge: myQuotes.filter(q => q.status === 'rejected').length },
   ];
 
-  const handleSendQuote = (quoteId: string) => {
-    updateQuote(quoteId, { 
-      status: 'sent', 
-      sentAt: new Date().toISOString() 
-    });
+  const handleSendQuote = async (quoteId: string) => {
+    if (!user || !user.companyId) return;
+
+    try {
+      // Check eligibility
+      const eligibility = await canCreateQuote(user.companyId);
+      if (!eligibility.canCreate) {
+        toast.error(eligibility.reason || 'Unable to send quote');
+        return;
+      }
+
+      // Update quote status
+      await updateQuote(quoteId, { 
+        status: 'sent', 
+        sentAt: new Date().toISOString() 
+      });
+
+      // Deduct credit/increment counter
+      await deductQuoteCredit(user.companyId);
+      toast.success('Quote sent successfully! Credit deducted.');
+    } catch (error) {
+      console.error('Error sending quote:', error);
+      toast.error('Failed to send quote. Please try again.');
+    }
   };
 
   return (
@@ -85,7 +122,31 @@ export function QuotesListPage() {
       </Card>
 
       {/* Quotes List */}
-      {filteredQuotes.length > 0 ? (
+      {isLoading ? (
+        // Skeleton Loading
+        <div className="space-y-4">
+          {[1, 2, 3].map((i) => (
+            <Card key={i}>
+              <div className="animate-pulse">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4 flex-1">
+                    <div className="w-12 h-12 bg-slate-700 rounded-xl" />
+                    <div className="flex-1">
+                      <div className="h-4 bg-slate-700 rounded w-32 mb-2" />
+                      <div className="h-5 bg-slate-700 rounded w-48 mb-2" />
+                      <div className="h-3 bg-slate-700 rounded w-64" />
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="h-6 bg-slate-700 rounded w-24 mb-2" />
+                    <div className="h-4 bg-slate-700 rounded w-32" />
+                  </div>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      ) : filteredQuotes.length > 0 ? (
         <div className="space-y-4">
           {filteredQuotes.map((quote, index) => (
             <motion.div
@@ -140,7 +201,13 @@ export function QuotesListPage() {
                       )}
                       {quote.status === 'draft' && (
                         <button
-                          onClick={() => deleteQuote(quote.id)}
+                          onClick={async () => {
+                            try {
+                              await deleteQuote(quote.id);
+                            } catch (error) {
+                              console.error('Error deleting quote:', error);
+                            }
+                          }}
                           className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                           title="Delete"
                         >
@@ -193,7 +260,13 @@ export function QuotesListPage() {
                       )}
                       {quote.status === 'draft' && (
                         <button
-                          onClick={() => deleteQuote(quote.id)}
+                          onClick={async () => {
+                            try {
+                              await deleteQuote(quote.id);
+                            } catch (error) {
+                              console.error('Error deleting quote:', error);
+                            }
+                          }}
                           className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                           title="Delete"
                         >

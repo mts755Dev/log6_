@@ -236,7 +236,60 @@ export function SignupPage() {
 
         userId = data.user.id;
         accountCreated = true;
-        console.log('Account created successfully, uploading documents...');
+        console.log('Account created successfully...');
+
+        // Create company if company name was provided
+        let companyId: string | null = null;
+        if (formData.companyName && formData.companyName.trim() !== '') {
+          console.log('Creating company record with 5 free trial credits...');
+          const { data: companyData, error: companyError } = await supabase
+            .from('companies')
+            .insert({
+              name: formData.companyName,
+              email: formData.email,
+              phone: formData.phone || '',
+              address: '',
+              postcode: '',
+              mcs_number: null,
+              is_umbrella_scheme: false,
+              owner_id: userId, // Link company to the user who created it
+              payment_model: null, // No payment model chosen yet - on trial
+              credit_balance: 5, // 5 FREE trial credits
+              credit_price: 3.00,
+              subscription_tier: null, // No tier yet - on trial
+              subscription_status: 'trial',
+              subscription_end_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(), // 14 day trial
+              monthly_proposal_limit: null,
+              proposals_used_this_month: 0,
+              proposal_reset_date: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString(),
+              logo: null,
+              brand_color: '#0c8cf1',
+            })
+            .select('id')
+            .single();
+
+          if (companyError) {
+            console.warn('Company creation failed:', companyError);
+            // Don't fail the signup, just log it
+          } else if (companyData) {
+            companyId = companyData.id;
+            console.log('Company created successfully, linking to user profile...');
+
+            // Update user profile with company_id
+            const { error: profileError } = await supabase
+              .from('profiles')
+              .update({ company_id: companyId, phone: formData.phone || null })
+              .eq('id', userId);
+
+            if (profileError) {
+              console.warn('Failed to link company to profile:', profileError);
+            } else {
+              console.log('User profile linked to company successfully!');
+            }
+          }
+        }
+
+        console.log('Uploading documents...');
 
         // Now upload documents
         try {

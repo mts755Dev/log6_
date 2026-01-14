@@ -10,6 +10,8 @@ import {
   MoreVertical,
   Trash2,
   XCircle,
+  Coins,
+  CreditCard,
 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -33,8 +35,11 @@ export function CompaniesPage() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isAddCreditsModalOpen, setIsAddCreditsModalOpen] = useState(false);
   const [companyToEdit, setCompanyToEdit] = useState<Company | null>(null);
   const [companyToDelete, setCompanyToDelete] = useState<Company | null>(null);
+  const [companyForCredits, setCompanyForCredits] = useState<Company | null>(null);
+  const [creditsToAdd, setCreditsToAdd] = useState(1);
   const [companyStats, setCompanyStats] = useState<Record<string, { userCount: number; quoteCount: number; totalValue: number }>>({});
   const [formData, setFormData] = useState({
     name: '',
@@ -44,9 +49,13 @@ export function CompaniesPage() {
     postcode: '',
     mcsNumber: '',
     isUmbrellaScheme: false,
+    paymentModel: 'subscription' as 'pay-as-you-go' | 'subscription',
+    creditBalance: 0,
+    creditPrice: 3.00,
     subscriptionTier: 'starter' as 'starter' | 'professional' | 'enterprise',
     subscriptionStatus: 'trial' as 'active' | 'trial' | 'expired' | 'cancelled',
     subscriptionEndDate: '',
+    monthlyProposalLimit: 100,
   });
 
   // Fetch companies from Supabase
@@ -70,9 +79,15 @@ export function CompaniesPage() {
         postcode: company.postcode,
         mcsNumber: company.mcs_number,
         isUmbrellaScheme: company.is_umbrella_scheme,
+        paymentModel: company.payment_model || 'subscription',
+        creditBalance: company.credit_balance || 0,
+        creditPrice: parseFloat(company.credit_price) || 3.00,
         subscriptionTier: company.subscription_tier,
         subscriptionStatus: company.subscription_status,
         subscriptionEndDate: company.subscription_end_date,
+        monthlyProposalLimit: company.monthly_proposal_limit,
+        proposalsUsedThisMonth: company.proposals_used_this_month || 0,
+        proposalResetDate: company.proposal_reset_date,
         logo: company.logo,
         brandColor: company.brand_color,
         createdAt: company.created_at,
@@ -123,7 +138,7 @@ export function CompaniesPage() {
     try {
       setIsLoading(true);
 
-      const { data, error } = await supabaseAdmin
+      const { data, error} = await supabaseAdmin
         .from('companies')
         .insert([{
           name: formData.name,
@@ -133,9 +148,15 @@ export function CompaniesPage() {
           postcode: formData.postcode,
           mcs_number: formData.mcsNumber || null,
           is_umbrella_scheme: formData.isUmbrellaScheme,
+          payment_model: formData.paymentModel,
+          credit_balance: formData.paymentModel === 'pay-as-you-go' ? formData.creditBalance : 0,
+          credit_price: formData.creditPrice,
           subscription_tier: formData.subscriptionTier,
           subscription_status: formData.subscriptionStatus,
           subscription_end_date: formData.subscriptionEndDate,
+          monthly_proposal_limit: formData.paymentModel === 'subscription' ? formData.monthlyProposalLimit : null,
+          proposals_used_this_month: 0,
+          proposal_reset_date: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString(),
         }])
         .select();
 
@@ -170,9 +191,13 @@ export function CompaniesPage() {
           postcode: formData.postcode,
           mcs_number: formData.mcsNumber || null,
           is_umbrella_scheme: formData.isUmbrellaScheme,
+          payment_model: formData.paymentModel,
+          credit_balance: formData.creditBalance,
+          credit_price: formData.creditPrice,
           subscription_tier: formData.subscriptionTier,
           subscription_status: formData.subscriptionStatus,
           subscription_end_date: formData.subscriptionEndDate,
+          monthly_proposal_limit: formData.paymentModel === 'subscription' ? formData.monthlyProposalLimit : null,
         })
         .eq('id', companyToEdit.id);
 
@@ -227,9 +252,13 @@ export function CompaniesPage() {
       postcode: company.postcode,
       mcsNumber: company.mcsNumber || '',
       isUmbrellaScheme: company.isUmbrellaScheme,
+      paymentModel: company.paymentModel,
+      creditBalance: company.creditBalance,
+      creditPrice: company.creditPrice,
       subscriptionTier: company.subscriptionTier,
       subscriptionStatus: company.subscriptionStatus,
       subscriptionEndDate: company.subscriptionEndDate.split('T')[0], // Format for date input
+      monthlyProposalLimit: company.monthlyProposalLimit || 100,
     });
     setIsEditModalOpen(true);
   };
@@ -237,6 +266,42 @@ export function CompaniesPage() {
   const handleDeleteClick = (company: Company) => {
     setCompanyToDelete(company);
     setIsDeleteModalOpen(true);
+  };
+
+  const handleAddCreditsClick = (company: Company) => {
+    setCompanyForCredits(company);
+    setCreditsToAdd(1);
+    setIsAddCreditsModalOpen(true);
+  };
+
+  const handleAddCredits = async () => {
+    if (!companyForCredits) return;
+
+    try {
+      setIsLoading(true);
+
+      const newBalance = companyForCredits.creditBalance + creditsToAdd;
+
+      const { error } = await supabaseAdmin
+        .from('companies')
+        .update({
+          credit_balance: newBalance,
+        })
+        .eq('id', companyForCredits.id);
+
+      if (error) throw error;
+
+      await fetchCompanies();
+      setIsAddCreditsModalOpen(false);
+      setCompanyForCredits(null);
+      setCreditsToAdd(1);
+      toast.success(`Added ${creditsToAdd} credits successfully!`);
+    } catch (error: any) {
+      console.error('Error adding credits:', error);
+      toast.error(error.message || 'Failed to add credits. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const resetForm = () => {
@@ -248,9 +313,13 @@ export function CompaniesPage() {
       postcode: '',
       mcsNumber: '',
       isUmbrellaScheme: false,
+      paymentModel: 'subscription',
+      creditBalance: 0,
+      creditPrice: 3.00,
       subscriptionTier: 'starter',
       subscriptionStatus: 'trial',
       subscriptionEndDate: '',
+      monthlyProposalLimit: 100,
     });
   };
 
@@ -309,6 +378,18 @@ export function CompaniesPage() {
                     </div>
                   </div>
                   <div className="flex gap-1">
+                    {company.paymentModel === 'pay-as-you-go' && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleAddCreditsClick(company);
+                        }}
+                        className="p-2 text-slate-400 hover:text-warning-400 hover:bg-warning-500/10 rounded-lg transition-colors"
+                        title="Add credits"
+                      >
+                        <Coins className="w-4 h-4" />
+                      </button>
+                    )}
                     <button 
                       onClick={(e) => {
                         e.stopPropagation();
@@ -332,13 +413,39 @@ export function CompaniesPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 mb-4">
+                <div className="flex items-center gap-2 mb-4 flex-wrap">
+                  <Badge variant={company.paymentModel === 'pay-as-you-go' ? 'warning' : 'primary'}>
+                    {company.paymentModel === 'pay-as-you-go' ? 'Pay as you go' : 'Subscription'}
+                  </Badge>
                   <SubscriptionBadge status={company.subscriptionStatus} />
                   <Badge variant="slate">{company.subscriptionTier}</Badge>
                   {company.isUmbrellaScheme && (
                     <Badge variant="primary">Umbrella</Badge>
                   )}
                 </div>
+                
+                {/* Payment Model Stats */}
+                {company.paymentModel === 'pay-as-you-go' ? (
+                  <div className="p-3 bg-warning-500/10 border border-warning-500/20 rounded-lg mb-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-400">Credit Balance</span>
+                      <span className="text-lg font-bold text-warning-400">{company.creditBalance} credits</span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">£{company.creditPrice.toFixed(2)} per credit</p>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-primary-500/10 border border-primary-500/20 rounded-lg mb-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-400">Proposals Used</span>
+                      <span className="text-lg font-bold text-primary-400">
+                        {company.proposalsUsedThisMonth} / {company.monthlyProposalLimit || '∞'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Resets: {format(new Date(company.proposalResetDate), 'dd MMM yyyy')}
+                    </p>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-3 gap-2 mb-4">
                   <div className="p-2 bg-slate-800/50 rounded-lg text-center">
@@ -441,6 +548,82 @@ export function CompaniesPage() {
             required
           />
 
+          {/* Payment Model Selection */}
+          <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+            <label className="block text-sm font-medium text-white mb-3">Payment Model</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, paymentModel: 'subscription' })}
+                className={`p-4 rounded-lg border-2 transition-all ${
+                  formData.paymentModel === 'subscription'
+                    ? 'border-primary-500 bg-primary-500/10'
+                    : 'border-slate-700 bg-slate-800/30 hover:border-slate-600'
+                }`}
+              >
+                <div className="text-center">
+                  <p className="font-semibold text-white mb-1">Subscription</p>
+                  <p className="text-xs text-slate-400">Monthly billing with proposal limits</p>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, paymentModel: 'pay-as-you-go' })}
+                className={`p-4 rounded-lg border-2 transition-all ${
+                  formData.paymentModel === 'pay-as-you-go'
+                    ? 'border-warning-500 bg-warning-500/10'
+                    : 'border-slate-700 bg-slate-800/30 hover:border-slate-600'
+                }`}
+              >
+                <div className="text-center">
+                  <p className="font-semibold text-white mb-1">Pay as you go</p>
+                  <p className="text-xs text-slate-400">Credit-based, no expiry</p>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Conditional Fields Based on Payment Model */}
+          {formData.paymentModel === 'pay-as-you-go' ? (
+            <div className="grid grid-cols-2 gap-4">
+              <Input
+                label="Initial Credit Balance"
+                type="number"
+                value={formData.creditBalance}
+                onChange={(e) => setFormData({ ...formData, creditBalance: Number(e.target.value) })}
+                placeholder="0"
+                hint="Starting credits (1 credit = 1 proposal)"
+              />
+              <Input
+                label="Credit Price (£)"
+                type="number"
+                step="0.01"
+                value={formData.creditPrice}
+                onChange={(e) => setFormData({ ...formData, creditPrice: Number(e.target.value) })}
+                placeholder="3.00"
+                hint="Price per credit in GBP"
+              />
+            </div>
+          ) : (
+            <>
+              <Input
+                label="Monthly Proposal Limit"
+                type="number"
+                value={formData.monthlyProposalLimit}
+                onChange={(e) => setFormData({ ...formData, monthlyProposalLimit: Number(e.target.value) })}
+                placeholder="100"
+                hint="Max proposals per month (empty = unlimited)"
+              />
+              <Input
+                label="Subscription End Date"
+                type="date"
+                value={formData.subscriptionEndDate}
+                onChange={(e) => setFormData({ ...formData, subscriptionEndDate: e.target.value })}
+                required
+              />
+            </>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <Select
               label="Subscription Tier"
@@ -464,14 +647,6 @@ export function CompaniesPage() {
               ]}
             />
           </div>
-
-          <Input
-            label="Subscription End Date"
-            type="date"
-            value={formData.subscriptionEndDate}
-            onChange={(e) => setFormData({ ...formData, subscriptionEndDate: e.target.value })}
-            required
-          />
 
           <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
             <label className="flex items-center justify-between cursor-pointer">
@@ -582,6 +757,82 @@ export function CompaniesPage() {
             required
           />
 
+          {/* Payment Model Selection */}
+          <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+            <label className="block text-sm font-medium text-white mb-3">Payment Model</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, paymentModel: 'subscription' })}
+                className={`p-4 rounded-lg border-2 transition-all ${
+                  formData.paymentModel === 'subscription'
+                    ? 'border-primary-500 bg-primary-500/10'
+                    : 'border-slate-700 bg-slate-800/30 hover:border-slate-600'
+                }`}
+              >
+                <div className="text-center">
+                  <p className="font-semibold text-white mb-1">Subscription</p>
+                  <p className="text-xs text-slate-400">Monthly billing with proposal limits</p>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, paymentModel: 'pay-as-you-go' })}
+                className={`p-4 rounded-lg border-2 transition-all ${
+                  formData.paymentModel === 'pay-as-you-go'
+                    ? 'border-warning-500 bg-warning-500/10'
+                    : 'border-slate-700 bg-slate-800/30 hover:border-slate-600'
+                }`}
+              >
+                <div className="text-center">
+                  <p className="font-semibold text-white mb-1">Pay as you go</p>
+                  <p className="text-xs text-slate-400">Credit-based, no expiry</p>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Conditional Fields Based on Payment Model */}
+          {formData.paymentModel === 'pay-as-you-go' ? (
+            <div className="grid grid-cols-2 gap-4">
+              <Input
+                label="Credit Balance"
+                type="number"
+                value={formData.creditBalance}
+                onChange={(e) => setFormData({ ...formData, creditBalance: Number(e.target.value) })}
+                placeholder="0"
+                hint="Current credit balance (1 credit = 1 proposal)"
+              />
+              <Input
+                label="Credit Price (£)"
+                type="number"
+                step="0.01"
+                value={formData.creditPrice}
+                onChange={(e) => setFormData({ ...formData, creditPrice: Number(e.target.value) })}
+                placeholder="3.00"
+                hint="Price per credit in GBP"
+              />
+            </div>
+          ) : (
+            <>
+              <Input
+                label="Monthly Proposal Limit"
+                type="number"
+                value={formData.monthlyProposalLimit}
+                onChange={(e) => setFormData({ ...formData, monthlyProposalLimit: Number(e.target.value) })}
+                placeholder="100"
+                hint="Max proposals per month (empty = unlimited)"
+              />
+              <Input
+                label="Subscription End Date"
+                type="date"
+                value={formData.subscriptionEndDate}
+                onChange={(e) => setFormData({ ...formData, subscriptionEndDate: e.target.value })}
+                required
+              />
+            </>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <Select
               label="Subscription Tier"
@@ -605,14 +856,6 @@ export function CompaniesPage() {
               ]}
             />
           </div>
-
-          <Input
-            label="Subscription End Date"
-            type="date"
-            value={formData.subscriptionEndDate}
-            onChange={(e) => setFormData({ ...formData, subscriptionEndDate: e.target.value })}
-            required
-          />
 
           <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
             <label className="flex items-center justify-between cursor-pointer">
@@ -654,7 +897,7 @@ export function CompaniesPage() {
               onClick={handleUpdateCompany}
               className="flex-1"
               isLoading={isLoading}
-              disabled={!formData.name || !formData.email || !formData.phone || !formData.address || !formData.postcode || !formData.subscriptionEndDate}
+              disabled={!formData.name || !formData.email || !formData.phone || !formData.address || !formData.postcode}
             >
               Update Company
             </Button>
@@ -703,6 +946,116 @@ export function CompaniesPage() {
               isLoading={isLoading}
             >
               Delete Company
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Add Credits Modal */}
+      <Modal
+        isOpen={isAddCreditsModalOpen}
+        onClose={() => {
+          setIsAddCreditsModalOpen(false);
+          setCompanyForCredits(null);
+          setCreditsToAdd(1);
+        }}
+        title="Add Credits"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="p-4 bg-warning-500/10 border border-warning-500/20 rounded-lg">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-slate-400">Company</span>
+              <span className="font-semibold text-white">{companyForCredits?.name}</span>
+            </div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-slate-400">Current Balance</span>
+              <span className="font-semibold text-warning-400">{companyForCredits?.creditBalance} credits</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-slate-400">Credit Price</span>
+              <span className="font-semibold text-white">£{companyForCredits?.creditPrice.toFixed(2)} each</span>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-white mb-2">
+              Credits to Add
+            </label>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setCreditsToAdd(Math.max(1, creditsToAdd - 1))}
+                className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+                disabled={creditsToAdd <= 1}
+              >
+                <span className="text-xl font-bold text-white">−</span>
+              </button>
+              <Input
+                type="number"
+                value={creditsToAdd}
+                onChange={(e) => setCreditsToAdd(Math.max(1, Number(e.target.value)))}
+                className="text-center text-2xl font-bold"
+                min="1"
+              />
+              <button
+                onClick={() => setCreditsToAdd(creditsToAdd + 1)}
+                className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+              >
+                <span className="text-xl font-bold text-white">+</span>
+              </button>
+            </div>
+            <div className="flex items-center justify-center gap-4 mt-3">
+              {[1, 5, 10, 20, 50].map((amount) => (
+                <button
+                  key={amount}
+                  onClick={() => setCreditsToAdd(amount)}
+                  className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                    creditsToAdd === amount
+                      ? 'bg-warning-600 text-white'
+                      : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
+                  }`}
+                >
+                  {amount}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="p-4 bg-slate-800/50 border border-slate-700 rounded-lg">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm text-slate-400">Total Cost</span>
+              <span className="text-xl font-bold text-white">
+                £{((companyForCredits?.creditPrice || 3) * creditsToAdd).toFixed(2)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-slate-400">New Balance</span>
+              <span className="text-lg font-semibold text-success-400">
+                {(companyForCredits?.creditBalance || 0) + creditsToAdd} credits
+              </span>
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setIsAddCreditsModalOpen(false);
+                setCompanyForCredits(null);
+                setCreditsToAdd(1);
+              }}
+              className="flex-1"
+              disabled={isLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddCredits}
+              className="flex-1 bg-warning-600 hover:bg-warning-700 text-white"
+              leftIcon={<Coins className="w-4 h-4" />}
+              isLoading={isLoading}
+            >
+              Add {creditsToAdd} Credit{creditsToAdd > 1 ? 's' : ''}
             </Button>
           </div>
         </div>

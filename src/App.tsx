@@ -16,6 +16,7 @@ import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { CompaniesPage } from './pages/admin/CompaniesPage';
 import { UsersPage } from './pages/admin/UsersPage';
 import { ProductsAdminPage } from './pages/admin/ProductsAdminPage';
+import { AdminQuotesPage } from './pages/admin/AdminQuotesPage';
 
 // Installer Pages
 import { InstallerDashboard } from './pages/installer/InstallerDashboard';
@@ -53,7 +54,7 @@ function App() {
               <Route path="companies" element={<CompaniesPage />} />
               <Route path="users" element={<UsersPage />} />
               <Route path="products" element={<ProductsAdminPage />} />
-              <Route path="quotes" element={<PlaceholderPage />} />
+              <Route path="quotes" element={<AdminQuotesPage />} />
               <Route path="submissions" element={<PlaceholderPage />} />
               <Route path="certificates" element={<PlaceholderPage />} />
               <Route path="settings" element={<PlaceholderPage />} />
@@ -64,6 +65,7 @@ function App() {
               <Route index element={<InstallerDashboard />} />
               <Route path="quotes" element={<QuotesListPage />} />
               <Route path="quotes/new" element={<NewQuotePage />} />
+              <Route path="quotes/:id/edit" element={<NewQuotePage />} />
               <Route path="quotes/:id" element={<QuoteDetailPage />} />
               <Route path="proposals" element={<PlaceholderPage />} />
               <Route path="commissions" element={<CommissionsPage />} />

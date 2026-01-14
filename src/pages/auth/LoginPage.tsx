@@ -264,28 +264,30 @@ export function LoginPage() {
             </p>
           </div>
 
-          {/* Portal switcher */}
-          <div className="mt-8 pt-6 border-t border-slate-800">
-            <p className="text-sm text-slate-500 text-center mb-4">Switch portal</p>
-            <div className="flex justify-center gap-3">
-              {Object.entries(roleConfig)
-                .filter(([key]) => key !== 'admin') // Hide admin from portal switcher
-                .map(([key, value]) => (
-                <Link
-                  key={key}
-                  to={`/login/${key}`}
-                  className={`p-3 rounded-xl border transition-all ${
-                    key === currentRole
-                      ? 'border-primary-500 bg-primary-500/10 text-primary-400'
-                      : 'border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800/50'
-                  }`}
-                  title={value.title}
-                >
-                  {value.icon}
-                </Link>
-              ))}
+          {/* Portal switcher - Hide for admin */}
+          {currentRole !== 'admin' && (
+            <div className="mt-8 pt-6 border-t border-slate-800">
+              <p className="text-sm text-slate-500 text-center mb-4">Switch portal</p>
+              <div className="flex justify-center gap-3">
+                {Object.entries(roleConfig)
+                  .filter(([key]) => key !== 'admin') // Hide admin from portal switcher
+                  .map(([key, value]) => (
+                  <Link
+                    key={key}
+                    to={`/login/${key}`}
+                    className={`p-3 rounded-xl border transition-all ${
+                      key === currentRole
+                        ? 'border-primary-500 bg-primary-500/10 text-primary-400'
+                        : 'border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800/50'
+                    }`}
+                    title={value.title}
+                  >
+                    {value.icon}
+                  </Link>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Back to home */}
           <div className="mt-8 text-center">

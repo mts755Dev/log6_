@@ -24,11 +24,28 @@ export interface Company {
   postcode: string;
   mcsNumber?: string;
   isUmbrellaScheme: boolean;
+  ownerId?: string; // The user who created/owns this company
+  
+  // Payment Model
+  paymentModel: 'pay-as-you-go' | 'subscription' | null; // null = trial/no payment model chosen yet
+  
+  // Pay-as-you-go fields
+  creditBalance: number;
+  creditPrice: number; // Price per credit (default £3)
+  
+  // Subscription fields
   subscriptionTier: 'starter' | 'professional' | 'enterprise';
   subscriptionStatus: 'active' | 'trial' | 'expired' | 'cancelled';
   subscriptionEndDate: string;
+  monthlyProposalLimit: number | null; // null = unlimited
+  proposalsUsedThisMonth: number;
+  proposalResetDate: string; // Date when counter resets
+  
+  // Branding
   logo?: string;
   brandColor?: string;
+  
+  // Timestamps
   createdAt: string;
 }
 

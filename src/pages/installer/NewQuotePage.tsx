@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -23,8 +23,10 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
+import { ChoosePaymentModel } from '../../components/payments/ChoosePaymentModel';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
+import { useToast } from '../../contexts/ToastContext';
 import type { Quote, QuoteLineItem, ROIProjection, CustomerInfo, TariffInfo } from '../../types';
 
 const steps = [
@@ -37,11 +39,15 @@ const steps = [
 ];
 
 export function NewQuotePage() {
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const toast = useToast();
   const { user } = useAuth();
-  const { batteries, inverters, createQuote } = useData();
+  const { batteries, inverters, createQuote, updateQuote, getQuote, canCreateQuote, deductQuoteCredit, getCompany } = useData();
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
 
   // Form state
   const [customer, setCustomer] = useState<CustomerInfo>({
@@ -197,16 +203,72 @@ export function NewQuotePage() {
     ));
   };
 
+  // Load existing quote data for editing
+  useEffect(() => {
+    if (id) {
+      const existingQuote = getQuote(id);
+      if (existingQuote) {
+        setIsEditMode(true);
+        setCustomer(existingQuote.customer);
+        setTariff(existingQuote.tariff);
+        setLineItems(existingQuote.lineItems);
+        setMargin(existingQuote.marginPercentage); // Use margin percentage from existing quote
+        setNotes(existingQuote.notes);
+        // Extract installation cost from line items if present
+        const installItem = existingQuote.lineItems.find(item => item.type === 'installation');
+        if (installItem) {
+          setInstallationCost(installItem.unitPrice);
+        }
+      } else {
+        toast.error('Quote not found');
+        navigate('/installer/quotes');
+      }
+    }
+  }, [id, getQuote, navigate, toast]);
+
   // Navigation
   const nextStep = () => setCurrentStep(prev => Math.min(prev + 1, steps.length - 1));
   const prevStep = () => setCurrentStep(prev => Math.max(prev - 1, 0));
 
   // Submit quote
   const handleSubmit = async (status: 'draft' | 'sent') => {
-    if (!user) return;
+    if (!user || !user.companyId) return;
+    
+    // Check if user needs to choose payment model
+    const company = getCompany(user.companyId);
+    if (company && company.subscriptionStatus === 'trial') {
+      if (company.paymentModel === 'pay-as-you-go' && company.creditBalance === 0) {
+        // Trial ended, no credits left - force payment choice
+        setShowPaymentModal(true);
+        toast.error('Trial credits used! Please purchase credits or upgrade to continue.');
+        return;
+      } else if (company.paymentModel === 'subscription' && 
+                 company.monthlyProposalLimit !== null && 
+                 company.proposalsUsedThisMonth >= company.monthlyProposalLimit) {
+        // Trial ended, proposal limit reached - force payment choice
+        setShowPaymentModal(true);
+        toast.error('Trial limit reached! Please upgrade your plan to continue.');
+        return;
+      }
+    }
+
     setIsSubmitting(true);
 
     try {
+      // Check if company can create a quote
+      if (status === 'sent') {
+        const eligibility = await canCreateQuote(user.companyId);
+        if (!eligibility.canCreate) {
+          // If it's a credit/limit issue and still on trial, show payment modal
+          if (company && company.subscriptionStatus === 'trial') {
+            setShowPaymentModal(true);
+          }
+          toast.error(eligibility.reason || 'Unable to create quote');
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
       // Add installation line item if not present
       const finalLineItems = [...lineItems];
       if (!finalLineItems.some(item => item.type === 'installation')) {
@@ -220,34 +282,82 @@ export function NewQuotePage() {
         });
       }
 
-      const quoteData: Omit<Quote, 'id' | 'createdAt' | 'updatedAt'> = {
-        companyId: user.companyId || '',
-        installerId: user.id,
-        installerName: user.name,
-        reference: `QT-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`,
-        status,
-        installationType: 'residential',
-        customer,
-        tariff,
-        lineItems: finalLineItems,
-        subtotal: calculations.subtotal,
-        vatRate: calculations.vatRate,
-        vatAmount: calculations.vatAmount,
-        total: calculations.total,
-        deposit: Math.round(calculations.total * 0.25),
-        margin: calculations.profit,
-        marginPercentage: calculations.marginPercentage,
-        roiProjections: calculations.roiProjections,
-        paybackYears: calculations.paybackYears,
-        annualSavings: calculations.annualSavings,
-        notes,
-        validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-      };
+      if (isEditMode && id) {
+        // Update existing quote
+        const updateData: Partial<Quote> = {
+          status,
+          customer,
+          tariff,
+          lineItems: finalLineItems,
+          subtotal: calculations.subtotal,
+          vatRate: calculations.vatRate,
+          vatAmount: calculations.vatAmount,
+          total: calculations.total,
+          deposit: Math.round(calculations.total * 0.25),
+          margin: calculations.profit,
+          marginPercentage: calculations.marginPercentage,
+          roiProjections: calculations.roiProjections,
+          paybackYears: calculations.paybackYears,
+          annualSavings: calculations.annualSavings,
+          notes,
+          validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          sentAt: status === 'sent' ? new Date().toISOString() : undefined,
+        };
 
-      const newQuote = createQuote(quoteData);
-      navigate(`/installer/quotes/${newQuote.id}`);
+        await updateQuote(id, updateData);
+
+        // Deduct credit if quote is being sent for the first time
+        const existingQuote = getQuote(id);
+        if (status === 'sent' && existingQuote?.status === 'draft') {
+          await deductQuoteCredit(user.companyId);
+          toast.success('Quote updated and credit deducted!');
+        } else {
+          toast.success('Quote updated successfully!');
+        }
+
+        navigate(`/installer/quotes/${id}`);
+      } else {
+        // Create new quote
+        const quoteData: Omit<Quote, 'id' | 'createdAt' | 'updatedAt'> = {
+          companyId: user.companyId,
+          installerId: user.id,
+          installerName: user.name,
+          reference: `QT-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`,
+          status,
+          installationType: 'residential',
+          customer,
+          tariff,
+          lineItems: finalLineItems,
+          subtotal: calculations.subtotal,
+          vatRate: calculations.vatRate,
+          vatAmount: calculations.vatAmount,
+          total: calculations.total,
+          deposit: Math.round(calculations.total * 0.25),
+          margin: calculations.profit,
+          marginPercentage: calculations.marginPercentage,
+          roiProjections: calculations.roiProjections,
+          paybackYears: calculations.paybackYears,
+          annualSavings: calculations.annualSavings,
+          notes,
+          validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          sentAt: status === 'sent' ? new Date().toISOString() : undefined,
+        };
+
+        const newQuote = await createQuote(quoteData);
+
+        // Deduct credit if quote is being sent
+        if (status === 'sent') {
+          await deductQuoteCredit(user.companyId);
+          toast.success('Quote sent to customer!');
+        } else {
+          toast.success('Quote saved as draft!');
+        }
+
+        navigate(`/installer/quotes/${newQuote.id}`);
+      }
     } catch (error) {
       console.error('Error creating quote:', error);
+      toast.error('Failed to create quote. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -261,7 +371,7 @@ export function NewQuotePage() {
           <ArrowLeft className="w-5 h-5 text-slate-400" />
         </button>
         <div className="min-w-0">
-          <h1 className="page-title text-lg sm:text-2xl">Create New Quote</h1>
+          <h1 className="page-title text-lg sm:text-2xl">{isEditMode ? 'Edit Quote' : 'Create New Quote'}</h1>
           <p className="page-subtitle text-xs sm:text-sm">Step {currentStep + 1} of {steps.length}: {steps[currentStep].title}</p>
         </div>
       </div>
@@ -872,6 +982,17 @@ export function NewQuotePage() {
           </Button>
         )}
       </div>
+
+      {/* Payment Modal - Shown when trial credits are used */}
+      {user?.companyId && (
+        <ChoosePaymentModel
+          isOpen={showPaymentModal}
+          onClose={() => setShowPaymentModal(false)}
+          companyId={user.companyId}
+          title="Trial Credits Used!"
+          message="You've used your 5 free trial credits. Choose a payment model to continue creating quotes."
+        />
+      )}
     </div>
   );
 }

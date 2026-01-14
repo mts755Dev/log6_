@@ -23,6 +23,7 @@ import { QuoteStatusBadge } from '../../components/ui/Badge';
 import { Modal, ConfirmModal } from '../../components/ui/Modal';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../contexts/ToastContext';
 import { generateQuotePDF } from '../../services/pdfGenerator';
 import { format } from 'date-fns';
 import {
@@ -38,10 +39,12 @@ import {
 export function QuoteDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const toast = useToast();
   const { user } = useAuth();
-  const { getQuote, updateQuote, deleteQuote } = useData();
+  const { getQuote, updateQuote, deleteQuote, canCreateQuote, deductQuoteCredit } = useData();
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isSending, setIsSending] = useState(false);
 
   const quote = id ? getQuote(id) : null;
 
@@ -69,16 +72,43 @@ export function QuoteDetailPage() {
     );
   }
 
-  const handleSendQuote = () => {
-    updateQuote(quote.id, {
-      status: 'sent',
-      sentAt: new Date().toISOString(),
-    });
+  const handleSendQuote = async () => {
+    if (!user || !user.companyId) return;
+    setIsSending(true);
+
+    try {
+      // Check eligibility
+      const eligibility = await canCreateQuote(user.companyId);
+      if (!eligibility.canCreate) {
+        toast.error(eligibility.reason || 'Unable to send quote');
+        setIsSending(false);
+        return;
+      }
+
+      // Update quote status
+      await updateQuote(quote.id, {
+        status: 'sent',
+        sentAt: new Date().toISOString(),
+      });
+
+      // Deduct credit/increment counter
+      await deductQuoteCredit(user.companyId);
+      toast.success('Quote sent successfully! Credit deducted.');
+    } catch (error) {
+      console.error('Error sending quote:', error);
+      toast.error('Failed to send quote. Please try again.');
+    } finally {
+      setIsSending(false);
+    }
   };
 
-  const handleDelete = () => {
-    deleteQuote(quote.id);
-    navigate('/installer/quotes');
+  const handleDelete = async () => {
+    try {
+      await deleteQuote(quote.id);
+      navigate('/installer/quotes');
+    } catch (error) {
+      console.error('Error deleting quote:', error);
+    }
   };
 
   const battery = quote.lineItems.find(li => li.type === 'battery');
@@ -110,7 +140,11 @@ export function QuoteDetailPage() {
         <div className="flex items-center gap-3">
           {quote.status === 'draft' && (
             <>
-              <Button variant="secondary" leftIcon={<Edit className="w-4 h-4" />}>
+              <Button 
+                variant="secondary" 
+                leftIcon={<Edit className="w-4 h-4" />}
+                onClick={() => navigate(`/installer/quotes/${quote.id}/edit`)}
+              >
                 Edit
               </Button>
               <Button
@@ -123,7 +157,11 @@ export function QuoteDetailPage() {
             </>
           )}
           {quote.status === 'draft' && (
-            <Button onClick={handleSendQuote} leftIcon={<Send className="w-4 h-4" />}>
+            <Button 
+              onClick={handleSendQuote} 
+              leftIcon={<Send className="w-4 h-4" />}
+              isLoading={isSending}
+            >
               Send to Customer
             </Button>
           )}

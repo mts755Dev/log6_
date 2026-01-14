@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Card, StatCard } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import { Badge } from '../../components/ui/Badge';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { QuoteStatusBadge } from '../../components/ui/Badge';
@@ -29,7 +31,25 @@ import {
 
 export function InstallerDashboard() {
   const { user } = useAuth();
-  const { quotes } = useData();
+  const { quotes, getCompany, refreshData } = useData();
+  const [isLoading, setIsLoading] = useState(true);
+  
+  const company = user?.companyId ? getCompany(user.companyId) : null;
+
+  // Fetch fresh data when component mounts
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true);
+      try {
+        await refreshData();
+      } catch (error) {
+        console.error('Error loading dashboard data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
+  }, [refreshData]);
 
   // Filter quotes for current user's company
   const myQuotes = quotes.filter(q => q.companyId === user?.companyId);
