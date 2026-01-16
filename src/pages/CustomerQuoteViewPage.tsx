@@ -1,0 +1,848 @@
+import { useState, useEffect, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import SignatureCanvas from 'react-signature-canvas';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import {
+  CheckCircle2,
+  Battery,
+  Zap,
+  Home,
+  TrendingUp,
+  Calendar,
+  Mail,
+  Phone,
+  MapPin,
+  FileText,
+  Sun,
+  Car,
+  Download,
+  Loader2,
+  Check,
+  X,
+  CreditCard,
+  ArrowRight,
+  ArrowLeft,
+} from 'lucide-react';
+import { Card } from '../components/ui/Card';
+import { Button } from '../components/ui/Button';
+import { Badge } from '../components/ui/Badge';
+import { Modal } from '../components/ui/Modal';
+import { Logo } from '../components/ui/Logo';
+import { supabase } from '../lib/supabase';
+import { useToast } from '../contexts/ToastContext';
+import { format } from 'date-fns';
+import type { Quote } from '../types';
+
+// Initialize Stripe
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '');
+
+// Payment Form Component
+interface PaymentFormProps {
+  clientSecret: string;
+  quote: Quote;
+  customerName: string;
+  customerSignature: string;
+  onSuccess: () => void;
+  onBack: () => void;
+}
+
+function PaymentForm({ clientSecret, quote, customerName, customerSignature, onSuccess, onBack }: PaymentFormProps) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const toast = useToast();
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!stripe || !elements) {
+      return;
+    }
+
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      const { error: submitError, paymentIntent } = await stripe.confirmPayment({
+        elements,
+        redirect: 'if_required',
+      });
+
+      if (submitError) {
+        setError(submitError.message || 'Payment failed');
+        setIsProcessing(false);
+      } else if (paymentIntent && paymentIntent.status === 'succeeded') {
+        // Payment succeeded! Now update quote with acceptance
+        const { error: updateError } = await supabase
+          .from('quotes')
+          .update({
+            status: 'accepted',
+            accepted_at: new Date().toISOString(),
+            customer_signature: customerSignature,
+            customer: {
+              ...quote.customer,
+              name: customerName,
+            },
+          })
+          .eq('id', quote.id);
+
+        if (updateError) {
+          console.error('Error updating quote:', updateError);
+          toast.error('Payment succeeded but failed to update quote. Please contact the installer.');
+        } else {
+          // Payment transaction will be updated automatically via Stripe webhook
+          // No need to update it here from the client side
+          toast.success('Payment successful! Quote accepted.');
+          onSuccess();
+        }
+      }
+    } catch (err: any) {
+      console.error('Payment error:', err);
+      setError(err.message || 'An unexpected error occurred');
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      <div className="bg-slate-800/50 rounded-lg p-4 mb-4">
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-sm text-slate-400">Deposit Amount</span>
+          <span className="text-2xl font-bold text-primary-400">£{quote.deposit.toLocaleString()}</span>
+        </div>
+        <p className="text-xs text-slate-500">
+          Balance of £{(quote.total - quote.deposit).toLocaleString()} due on completion
+        </p>
+      </div>
+
+      <div className="min-h-[200px]">
+        <PaymentElement 
+          options={{
+            layout: 'tabs'
+          }}
+        />
+      </div>
+      
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-400">
+          {error}
+        </div>
+      )}
+
+      <div className="flex gap-3">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={onBack}
+          disabled={isProcessing}
+          leftIcon={<ArrowLeft className="w-4 h-4" />}
+          className="flex-1"
+        >
+          Back
+        </Button>
+        <Button
+          type="submit"
+          disabled={!stripe || isProcessing}
+          isLoading={isProcessing}
+          leftIcon={<CreditCard className="w-4 h-4" />}
+          className="flex-1"
+        >
+          Pay £{quote.deposit.toLocaleString()}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+export function CustomerQuoteViewPage() {
+  const { quoteId, token } = useParams<{ quoteId: string; token: string }>();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const signaturePadRef = useRef<SignatureCanvas>(null);
+
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [company, setCompany] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAccepting, setIsAccepting] = useState(false);
+  const [showAcceptModal, setShowAcceptModal] = useState(false);
+  const [customerName, setCustomerName] = useState('');
+  const [error, setError] = useState('');
+  
+  // Payment flow states
+  const [acceptanceStep, setAcceptanceStep] = useState<'signature' | 'payment'>('signature');
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [signatureData, setSignatureData] = useState<string>('');
+
+  // Fetch quote data
+  useEffect(() => {
+    if (quoteId && token) {
+      fetchQuote();
+    } else {
+      setError('Invalid or missing quote link');
+      setIsLoading(false);
+    }
+  }, [quoteId, token]);
+
+  const fetchQuote = async () => {
+    if (!quoteId || !token) return;
+
+    try {
+      setIsLoading(true);
+      setError('');
+
+      // Fetch quote with token validation
+      // The RLS policy will automatically check if the token is valid
+      const { data: quoteData, error: quoteError } = await supabase
+        .from('quotes')
+        .select('*')
+        .eq('id', quoteId)
+        .eq('share_token', token)
+        .single();
+
+      if (quoteError) {
+        if (quoteError.code === 'PGRST116') {
+          // No rows returned - either quote doesn't exist, token is invalid, or link expired
+          setError('Invalid or expired quote link. Please request a new link from your installer.');
+        } else {
+          throw quoteError;
+        }
+        return;
+      }
+
+      if (!quoteData) {
+        setError('Quote not found or link has expired');
+        return;
+      }
+
+      // Map database format to Quote type
+      const mappedQuote: Quote = {
+        id: quoteData.id,
+        companyId: quoteData.company_id,
+        installerId: quoteData.installer_id,
+        installerName: quoteData.installer_name,
+        reference: quoteData.reference,
+        status: quoteData.status,
+        installationType: quoteData.installation_type,
+        customer: quoteData.customer,
+        tariff: quoteData.tariff,
+        lineItems: quoteData.line_items,
+        subtotal: quoteData.subtotal,
+        vatRate: quoteData.vat_rate,
+        vatAmount: quoteData.vat_amount,
+        total: quoteData.total,
+        deposit: quoteData.deposit,
+        margin: quoteData.margin,
+        marginPercentage: quoteData.margin_percentage,
+        roiProjections: quoteData.roi_projections,
+        paybackYears: quoteData.payback_years,
+        annualSavings: quoteData.annual_savings,
+        notes: quoteData.notes,
+        validUntil: quoteData.valid_until,
+        createdAt: quoteData.created_at,
+        updatedAt: quoteData.updated_at,
+        sentAt: quoteData.sent_at,
+        viewedAt: quoteData.viewed_at,
+        acceptedAt: quoteData.accepted_at,
+        customerSignature: quoteData.customer_signature,
+      };
+
+      setQuote(mappedQuote);
+      setCustomerName(mappedQuote.customer.name);
+
+      // Fetch company details for branding
+      const { data: companyData } = await supabase
+        .from('companies')
+        .select('*')
+        .eq('id', quoteData.company_id)
+        .single();
+
+      setCompany(companyData);
+
+      // Mark as viewed if not already viewed
+      if (!quoteData.viewed_at && quoteData.status === 'sent') {
+        await supabase
+          .from('quotes')
+          .update({
+            status: 'viewed',
+            viewed_at: new Date().toISOString(),
+          })
+          .eq('id', quoteId);
+      }
+    } catch (err: any) {
+      console.error('Error fetching quote:', err);
+      setError(err.message || 'Failed to load quote');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleProceedToPayment = async () => {
+    if (!quote || !signaturePadRef.current) return;
+
+    // Validate signature
+    if (signaturePadRef.current.isEmpty()) {
+      toast.error('Please provide your signature');
+      return;
+    }
+
+    // Validate name
+    if (!customerName.trim()) {
+      toast.error('Please enter your name');
+      return;
+    }
+
+    setIsAccepting(true);
+
+    try {
+      // Get signature as base64
+      const signature = signaturePadRef.current.toDataURL();
+      setSignatureData(signature);
+
+      // Create payment intent via edge function
+      const { data, error } = await supabase.functions.invoke('create-quote-deposit-payment', {
+        body: {
+          quoteId: quote.id,
+          depositAmount: quote.deposit,
+        },
+      });
+
+      if (error) throw error;
+
+      setClientSecret(data.clientSecret);
+      setAcceptanceStep('payment');
+    } catch (err: any) {
+      console.error('Error creating payment:', err);
+      toast.error(err.message || 'Failed to initialize payment');
+    } finally {
+      setIsAccepting(false);
+    }
+  };
+
+  const handlePaymentSuccess = async () => {
+    // Refresh quote to show accepted status
+    await fetchQuote();
+    setShowAcceptModal(false);
+    setAcceptanceStep('signature');
+    setClientSecret(null);
+    setSignatureData('');
+    toast.success('Payment successful! Quote accepted. The installer will contact you shortly.');
+  };
+
+  const handleBackToSignature = () => {
+    setAcceptanceStep('signature');
+    setClientSecret(null);
+  };
+
+  const clearSignature = () => {
+    signaturePadRef.current?.clear();
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 text-primary-400 animate-spin mx-auto mb-4" />
+          <p className="text-slate-400">Loading your quote...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !quote) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center p-4">
+        <Card className="max-w-md">
+          <div className="text-center py-8">
+            <X className="w-16 h-16 text-red-400 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-white mb-2">Quote Not Found</h2>
+            <p className="text-slate-400 mb-6">
+              {error || 'This quote may have been removed or the link is invalid.'}
+            </p>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  const isExpired = new Date(quote.validUntil) < new Date();
+  const canAccept = quote.status !== 'accepted' && !isExpired;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+      {/* Header */}
+      <div className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-10">
+        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {company?.logo ? (
+              <img src={company.logo} alt={company.name} className="h-10" />
+            ) : (
+              <Logo variant="light" size="md" />
+            )}
+            <div>
+              <h1 className="text-lg font-bold text-white">{company?.name || 'heliOS'}</h1>
+              <p className="text-xs text-slate-500">Battery Storage Proposal</p>
+            </div>
+          </div>
+          {quote.status === 'accepted' ? (
+            <Badge className="bg-success-500/20 text-success-400 border-success-500/30">
+              <Check className="w-3 h-3 mr-1" />
+              Accepted
+            </Badge>
+          ) : isExpired ? (
+            <Badge className="bg-red-500/20 text-red-400 border-red-500/30">Expired</Badge>
+          ) : (
+            <Badge className="bg-primary-500/20 text-primary-400 border-primary-500/30">
+              Pending Response
+            </Badge>
+          )}
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+        {/* Quote Header */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          <Card className="bg-gradient-to-br from-primary-500/10 to-primary-600/5 border-primary-500/20">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <h2 className="text-2xl font-bold text-white mb-2">Hello {quote.customer.name}!</h2>
+                <p className="text-slate-300 mb-4">
+                  Thank you for your interest in battery storage. We've prepared a personalized proposal for you.
+                </p>
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center gap-2 text-slate-400">
+                    <FileText className="w-4 h-4" />
+                    <span>Quote Ref: <span className="text-primary-400 font-mono">{quote.reference}</span></span>
+                  </div>
+                  <div className="flex items-center gap-2 text-slate-400">
+                    <Calendar className="w-4 h-4" />
+                    <span>Valid until: {format(new Date(quote.validUntil), 'dd MMMM yyyy')}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-6">
+                <p className="text-sm text-slate-400 mb-2">Total Investment</p>
+                <p className="text-4xl font-bold text-white mb-1">£{quote.total.toLocaleString()}</p>
+                <p className="text-sm text-slate-400 mb-4">Inc. VAT (0% on battery storage)</p>
+                <div className="pt-4 border-t border-slate-700">
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-slate-400">Deposit Required</span>
+                    <span className="text-white font-medium">£{quote.deposit.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-400">Balance on Completion</span>
+                    <span className="text-white font-medium">£{(quote.total - quote.deposit).toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </motion.div>
+
+        {/* ROI Highlight */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.1 }}
+        >
+          <Card>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="text-center p-4 bg-success-500/10 rounded-xl border border-success-500/20">
+                <TrendingUp className="w-8 h-8 text-success-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">£{quote.annualSavings.toLocaleString()}</p>
+                <p className="text-sm text-slate-400">Estimated Annual Savings</p>
+              </div>
+              <div className="text-center p-4 bg-primary-500/10 rounded-xl border border-primary-500/20">
+                <Calendar className="w-8 h-8 text-primary-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">{quote.paybackYears} Years</p>
+                <p className="text-sm text-slate-400">Payback Period</p>
+              </div>
+              <div className="text-center p-4 bg-warning-500/10 rounded-xl border border-warning-500/20">
+                <Battery className="w-8 h-8 text-warning-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">
+                  {quote.lineItems
+                    .filter(item => item.type === 'battery')
+                    .reduce((sum, item) => sum + item.quantity, 0)}
+                  x Battery
+                </p>
+                <p className="text-sm text-slate-400">System Components</p>
+              </div>
+            </div>
+          </Card>
+        </motion.div>
+
+        {/* System Details */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.2 }}
+        >
+          <Card>
+            <h3 className="text-xl font-bold text-white mb-4">Your Proposed System</h3>
+            <div className="space-y-3">
+              {quote.lineItems.map((item) => (
+                <div key={item.id} className="flex items-center justify-between p-4 bg-slate-800/30 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    {item.type === 'battery' ? (
+                      <Battery className="w-5 h-5 text-primary-400" />
+                    ) : item.type === 'inverter' ? (
+                      <Zap className="w-5 h-5 text-warning-400" />
+                    ) : (
+                      <FileText className="w-5 h-5 text-slate-400" />
+                    )}
+                    <div>
+                      <p className="font-medium text-white">{item.description}</p>
+                      <p className="text-sm text-slate-500 capitalize">{item.type}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-medium text-white">£{(item.unitPrice * item.quantity).toLocaleString()}</p>
+                    <p className="text-sm text-slate-500">Qty: {item.quantity}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 pt-6 border-t border-slate-700">
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-400">Subtotal</span>
+                  <span className="text-white">£{quote.subtotal.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-400">VAT (0%)</span>
+                  <span className="text-white">£0</span>
+                </div>
+                <div className="flex justify-between text-lg font-bold pt-2 border-t border-slate-700">
+                  <span className="text-white">Total</span>
+                  <span className="text-primary-400">£{quote.total.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </motion.div>
+
+        {/* Property & Energy Details */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.3 }}
+        >
+          <Card>
+            <h3 className="text-xl font-bold text-white mb-4">Your Property Details</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <div>
+                  <div className="flex items-center gap-2 text-slate-400 mb-2">
+                    <MapPin className="w-4 h-4" />
+                    <span className="text-sm font-medium">Address</span>
+                  </div>
+                  <p className="text-white">{quote.customer.address}</p>
+                  <p className="text-white">{quote.customer.postcode}</p>
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 text-slate-400 mb-2">
+                    <Home className="w-4 h-4" />
+                    <span className="text-sm font-medium">Property Type</span>
+                  </div>
+                  <p className="text-white capitalize">{quote.customer.propertyType}</p>
+                </div>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <div className="flex items-center gap-2 text-slate-400 mb-2">
+                    <Zap className="w-4 h-4" />
+                    <span className="text-sm font-medium">Annual Consumption</span>
+                  </div>
+                  <p className="text-white">{quote.customer.annualConsumptionKwh.toLocaleString()} kWh/year</p>
+                </div>
+                {quote.customer.existingSolar && (
+                  <div>
+                    <div className="flex items-center gap-2 text-slate-400 mb-2">
+                      <Sun className="w-4 h-4" />
+                      <span className="text-sm font-medium">Existing Solar</span>
+                    </div>
+                    <p className="text-white">{quote.customer.solarCapacityKwp} kWp</p>
+                  </div>
+                )}
+                {quote.customer.hasEv && (
+                  <div>
+                    <div className="flex items-center gap-2 text-slate-400 mb-2">
+                      <Car className="w-4 h-4" />
+                      <span className="text-sm font-medium">Electric Vehicle</span>
+                    </div>
+                    <p className="text-white">{quote.customer.evMileagePerYear?.toLocaleString()} miles/year</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </Card>
+        </motion.div>
+
+        {/* ROI Projections */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.4 }}
+        >
+          <Card>
+            <h3 className="text-xl font-bold text-white mb-4">10-Year Savings Projection</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-700">
+                    <th className="text-left py-3 px-2 text-slate-400 font-medium">Year</th>
+                    <th className="text-right py-3 px-2 text-slate-400 font-medium">Annual Savings</th>
+                    <th className="text-right py-3 px-2 text-slate-400 font-medium">Cumulative</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {quote.roiProjections.map((projection) => (
+                    <tr key={projection.year} className="border-b border-slate-800">
+                      <td className="py-3 px-2 text-white">Year {projection.year}</td>
+                      <td className="text-right py-3 px-2 text-success-400">
+                        £{projection.savings.toLocaleString()}
+                      </td>
+                      <td className="text-right py-3 px-2 text-white font-medium">
+                        £{projection.cumulativeSavings.toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-slate-500 mt-4">
+              * Projections based on current energy prices with 3% annual inflation. Actual savings may vary based on usage patterns.
+            </p>
+          </Card>
+        </motion.div>
+
+        {/* Notes */}
+        {quote.notes && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.5 }}
+          >
+            <Card>
+              <h3 className="text-xl font-bold text-white mb-4">Additional Information</h3>
+              <p className="text-slate-300 whitespace-pre-wrap">{quote.notes}</p>
+            </Card>
+          </motion.div>
+        )}
+
+        {/* Accept Quote CTA */}
+        {canAccept && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.6 }}
+          >
+            <Card className="bg-gradient-to-br from-primary-500/20 to-success-500/10 border-primary-500/30">
+              <div className="text-center py-6">
+                <CheckCircle2 className="w-16 h-16 text-success-400 mx-auto mb-4" />
+                <h3 className="text-2xl font-bold text-white mb-2">Ready to Proceed?</h3>
+                <p className="text-slate-300 mb-6 max-w-2xl mx-auto">
+                  Accept this quote to begin your journey to energy independence. We'll contact you shortly to arrange your installation.
+                </p>
+                <Button
+                  size="lg"
+                  onClick={() => setShowAcceptModal(true)}
+                  leftIcon={<CheckCircle2 className="w-5 h-5" />}
+                  className="bg-gradient-to-r from-primary-500 to-success-500 hover:from-primary-600 hover:to-success-600"
+                >
+                  Accept Quote & Continue
+                </Button>
+              </div>
+            </Card>
+          </motion.div>
+        )}
+
+        {/* Already Accepted */}
+        {quote.status === 'accepted' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.6 }}
+          >
+            <Card className="bg-gradient-to-br from-success-500/20 to-success-600/10 border-success-500/30">
+              <div className="text-center py-6">
+                <Check className="w-16 h-16 text-success-400 mx-auto mb-4" />
+                <h3 className="text-2xl font-bold text-white mb-2">Quote Accepted!</h3>
+                <p className="text-slate-300 mb-4">
+                  Thank you for accepting this quote. We'll be in touch shortly to schedule your installation.
+                </p>
+                {quote.acceptedAt && (
+                  <p className="text-sm text-slate-500">
+                    Accepted on {format(new Date(quote.acceptedAt), 'dd MMMM yyyy \'at\' HH:mm')}
+                  </p>
+                )}
+              </div>
+            </Card>
+          </motion.div>
+        )}
+
+        {/* Footer */}
+        <div className="text-center py-8 border-t border-slate-800">
+          <p className="text-sm text-slate-500 mb-2">
+            Have questions? Contact {company?.name || 'us'}
+          </p>
+          <div className="flex items-center justify-center gap-6 text-sm">
+            {company?.email && (
+              <a href={`mailto:${company.email}`} className="flex items-center gap-2 text-primary-400 hover:text-primary-300">
+                <Mail className="w-4 h-4" />
+                {company.email}
+              </a>
+            )}
+            {company?.phone && (
+              <a href={`tel:${company.phone}`} className="flex items-center gap-2 text-primary-400 hover:text-primary-300">
+                <Phone className="w-4 h-4" />
+                {company.phone}
+              </a>
+            )}
+          </div>
+          <p className="text-xs text-slate-600 mt-6">Powered by heliOS</p>
+        </div>
+      </div>
+
+      {/* Accept Quote Modal */}
+      <Modal
+        isOpen={showAcceptModal}
+        onClose={() => {
+          setShowAcceptModal(false);
+          setAcceptanceStep('signature');
+          setClientSecret(null);
+          setSignatureData('');
+        }}
+        title={acceptanceStep === 'signature' ? 'Accept Quote' : 'Pay Deposit'}
+        size="lg"
+      >
+        <div className="space-y-6">
+          {/* Step Indicator */}
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <div className={`flex items-center gap-2 ${acceptanceStep === 'signature' ? 'text-primary-400' : 'text-success-400'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                acceptanceStep === 'signature' ? 'bg-primary-500/20 border-2 border-primary-500' : 'bg-success-500'
+              }`}>
+                {acceptanceStep === 'payment' ? <Check className="w-5 h-5 text-white" /> : '1'}
+              </div>
+              <span className="text-sm font-medium">Signature</span>
+            </div>
+            <div className="w-12 h-0.5 bg-slate-700"></div>
+            <div className={`flex items-center gap-2 ${acceptanceStep === 'payment' ? 'text-primary-400' : 'text-slate-500'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                acceptanceStep === 'payment' ? 'bg-primary-500/20 border-2 border-primary-500' : 'bg-slate-700'
+              }`}>
+                2
+              </div>
+              <span className="text-sm font-medium">Payment</span>
+            </div>
+          </div>
+
+          {acceptanceStep === 'signature' ? (
+            // Step 1: Signature
+            <>
+              <p className="text-slate-300">
+                By accepting this quote, you agree to proceed with the installation at the quoted price of{' '}
+                <span className="font-bold text-primary-400">£{quote.total.toLocaleString()}</span>.
+              </p>
+
+              <div className="bg-primary-500/10 border border-primary-500/30 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <CreditCard className="w-5 h-5 text-primary-400 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-primary-300 mb-1">Deposit Required</p>
+                    <p className="text-xs text-slate-400">
+                      You'll need to pay a <span className="font-semibold text-white">£{quote.deposit.toLocaleString()}</span> deposit 
+                      to confirm this quote. Balance of <span className="font-semibold text-white">£{(quote.total - quote.deposit).toLocaleString()}</span> due on completion.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Confirm Your Name
+                </label>
+                <input
+                  type="text"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-lg text-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/50 outline-none"
+                  placeholder="Enter your full name"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Your Signature
+                </label>
+                <div className="border-2 border-slate-700 rounded-lg bg-white">
+                  <SignatureCanvas
+                    ref={signaturePadRef}
+                    canvasProps={{
+                      className: 'w-full h-40 rounded-lg',
+                    }}
+                  />
+                </div>
+                <button
+                  onClick={clearSignature}
+                  className="text-sm text-primary-400 hover:text-primary-300 mt-2"
+                >
+                  Clear Signature
+                </button>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <Button
+                  variant="secondary"
+                  onClick={() => setShowAcceptModal(false)}
+                  disabled={isAccepting}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleProceedToPayment}
+                  isLoading={isAccepting}
+                  rightIcon={<ArrowRight className="w-4 h-4" />}
+                  className="flex-1"
+                >
+                  Proceed to Payment
+                </Button>
+              </div>
+            </>
+          ) : (
+            // Step 2: Payment
+            <>
+              {clientSecret && quote ? (
+                <Elements stripe={stripePromise} options={{ clientSecret }}>
+                  <PaymentForm
+                    clientSecret={clientSecret}
+                    quote={quote}
+                    customerName={customerName}
+                    customerSignature={signatureData}
+                    onSuccess={handlePaymentSuccess}
+                    onBack={handleBackToSignature}
+                  />
+                </Elements>
+              ) : (
+                <div className="py-12 text-center text-slate-400">
+                  <div className="inline-block w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+                  <p>Preparing payment...</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </Modal>
+    </div>
+  );
+}

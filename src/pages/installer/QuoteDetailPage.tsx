@@ -16,6 +16,10 @@ import {
   Clock,
   FileText,
   Battery,
+  Share2,
+  Copy,
+  ExternalLink,
+  Eye,
 } from 'lucide-react';
 import { Card, StatCard } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -26,6 +30,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { generateQuotePDF } from '../../services/pdfGenerator';
 import { format } from 'date-fns';
+import { supabase } from '../../lib/supabase';
 import {
   AreaChart,
   Area,
@@ -43,8 +48,11 @@ export function QuoteDetailPage() {
   const { user } = useAuth();
   const { getQuote, updateQuote, deleteQuote, canCreateQuote, deductQuoteCredit } = useData();
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [isGeneratingToken, setIsGeneratingToken] = useState(false);
 
   const quote = id ? getQuote(id) : null;
 
@@ -111,6 +119,77 @@ export function QuoteDetailPage() {
     }
   };
 
+  const generateOrFetchShareToken = async () => {
+    if (!quote) return null;
+
+    setIsGeneratingToken(true);
+    try {
+      // First, check if quote already has a token
+      const { data: existingQuote, error: fetchError } = await supabase
+        .from('quotes')
+        .select('share_token')
+        .eq('id', quote.id)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      if (existingQuote.share_token) {
+        setShareToken(existingQuote.share_token);
+        return existingQuote.share_token;
+      }
+
+      // Generate new token using the database function
+      const { data: tokenData, error: tokenError } = await supabase
+        .rpc('generate_quote_share_token');
+
+      if (tokenError) throw tokenError;
+
+      const newToken = tokenData as string;
+
+      // Update quote with new token
+      const { error: updateError } = await supabase
+        .from('quotes')
+        .update({ share_token: newToken })
+        .eq('id', quote.id);
+
+      if (updateError) throw updateError;
+
+      setShareToken(newToken);
+      return newToken;
+    } catch (error: any) {
+      console.error('Error generating share token:', error);
+      toast.error('Failed to generate secure link');
+      return null;
+    } finally {
+      setIsGeneratingToken(false);
+    }
+  };
+
+  const getShareLink = () => {
+    if (!shareToken) return '';
+    const baseUrl = window.location.origin;
+    return `${baseUrl}/quote/${quote.id}/${shareToken}`;
+  };
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(getShareLink());
+      toast.success('Secure link copied to clipboard!');
+    } catch (error) {
+      console.error('Error copying link:', error);
+      toast.error('Failed to copy link');
+    }
+  };
+
+  const handleOpenCustomerView = () => {
+    window.open(getShareLink(), '_blank');
+  };
+
+  const handleOpenShareModal = async () => {
+    setShowShareModal(true);
+    await generateOrFetchShareToken();
+  };
+
   const battery = quote.lineItems.find(li => li.type === 'battery');
   const batteryCapacity = battery ? 
     parseFloat(battery.description.match(/(\d+\.?\d*)\s*kWh/i)?.[1] || '0') : 0;
@@ -163,6 +242,15 @@ export function QuoteDetailPage() {
               isLoading={isSending}
             >
               Send to Customer
+            </Button>
+          )}
+          {(quote.status === 'sent' || quote.status === 'viewed' || quote.status === 'accepted') && (
+            <Button 
+              variant="secondary" 
+              leftIcon={<Share2 className="w-4 h-4" />}
+              onClick={handleOpenShareModal}
+            >
+              Share Link
             </Button>
           )}
           <Button 
@@ -447,6 +535,105 @@ export function QuoteDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Share Link Modal */}
+      <Modal
+        isOpen={showShareModal}
+        onClose={() => setShowShareModal(false)}
+        title="Share Quote with Customer"
+        size="lg"
+      >
+        <div className="space-y-6">
+          <div>
+            <p className="text-slate-300 mb-4">
+              Share this link with your customer so they can view and accept the quote online.
+            </p>
+            
+            {/* Quote Status Info */}
+            {quote.sentAt && (
+              <div className="bg-slate-800/50 rounded-lg p-4 mb-4">
+                <div className="flex items-center gap-2 text-sm text-slate-400 mb-2">
+                  <Send className="w-4 h-4" />
+                  <span>Sent on {format(new Date(quote.sentAt), 'dd MMMM yyyy \'at\' HH:mm')}</span>
+                </div>
+                {quote.viewedAt && (
+                  <div className="flex items-center gap-2 text-sm text-slate-400 mb-2">
+                    <Eye className="w-4 h-4" />
+                    <span>Viewed on {format(new Date(quote.viewedAt), 'dd MMMM yyyy \'at\' HH:mm')}</span>
+                  </div>
+                )}
+                {quote.acceptedAt && (
+                  <div className="flex items-center gap-2 text-sm text-success-400">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Accepted on {format(new Date(quote.acceptedAt), 'dd MMMM yyyy \'at\' HH:mm')}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              Secure Shareable Link
+            </label>
+            {isGeneratingToken ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="text-center">
+                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-400 mb-3"></div>
+                  <p className="text-slate-400 text-sm">Generating secure link...</p>
+                </div>
+              </div>
+            ) : shareToken ? (
+              <>
+                <div className="flex gap-2 mb-3">
+                  <input
+                    type="text"
+                    value={getShareLink()}
+                    readOnly
+                    className="flex-1 px-4 py-3 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono text-sm"
+                  />
+                  <Button
+                    variant="secondary"
+                    leftIcon={<Copy className="w-4 h-4" />}
+                    onClick={handleCopyLink}
+                  >
+                    Copy
+                  </Button>
+                </div>
+                <p className="text-xs text-slate-500">
+                  🔒 This link is secure and unique to this quote. Only users with this link can view the proposal.
+                </p>
+              </>
+            ) : (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-400">
+                Failed to generate secure link. Please try again.
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3">
+            <Button
+              variant="secondary"
+              leftIcon={<ExternalLink className="w-4 h-4" />}
+              onClick={handleOpenCustomerView}
+              className="flex-1"
+            >
+              Preview Customer View
+            </Button>
+            <Button
+              onClick={() => setShowShareModal(false)}
+              className="flex-1"
+            >
+              Done
+            </Button>
+          </div>
+
+          <div className="pt-4 border-t border-slate-700">
+            <p className="text-xs text-slate-500">
+              💡 Tip: You can copy this link and send it to your customer via email, WhatsApp, or SMS.
+              They'll be able to view the quote and accept it online without creating an account.
+            </p>
+          </div>
+        </div>
+      </Modal>
 
       {/* Delete Confirmation Modal */}
       <ConfirmModal

@@ -252,7 +252,7 @@ export function CompaniesPage() {
       postcode: company.postcode,
       mcsNumber: company.mcsNumber || '',
       isUmbrellaScheme: company.isUmbrellaScheme,
-      paymentModel: company.paymentModel,
+      paymentModel: company.paymentModel || 'pay-as-you-go',
       creditBalance: company.creditBalance,
       creditPrice: company.creditPrice,
       subscriptionTier: company.subscriptionTier,

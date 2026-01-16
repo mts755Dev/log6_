@@ -10,6 +10,7 @@ import { DashboardLayout } from './components/layouts/DashboardLayout';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/auth/LoginPage';
 import { SignupPage } from './pages/auth/SignupPage';
+import { CustomerQuoteViewPage } from './pages/CustomerQuoteViewPage';
 
 // Admin Pages
 import { AdminDashboard } from './pages/admin/AdminDashboard';
@@ -47,6 +48,7 @@ function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/login/:role" element={<LoginPage />} />
             <Route path="/signup/:role" element={<SignupPage />} />
+            <Route path="/quote/:quoteId/:token" element={<CustomerQuoteViewPage />} />
             
             {/* Admin Routes */}
             <Route path="/admin" element={<DashboardLayout requiredRole="admin" />}>

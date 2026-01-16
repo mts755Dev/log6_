@@ -8,6 +8,7 @@ import {
   Eye,
   Send,
   Trash2,
+  CheckCircle2,
 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -18,6 +19,7 @@ import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { format } from 'date-fns';
+import { supabase } from '../../lib/supabase';
 
 export function QuotesListPage() {
   const navigate = useNavigate();
@@ -74,15 +76,29 @@ export function QuotesListPage() {
         return;
       }
 
-      // Update quote status
+      // Generate secure share token if not exists
+      const quote = quotes.find(q => q.id === quoteId);
+      let shareToken = quote?.share_token;
+
+      if (!shareToken) {
+        // Generate new token
+        const { data: tokenData, error: tokenError } = await supabase
+          .rpc('generate_quote_share_token');
+
+        if (tokenError) throw tokenError;
+        shareToken = tokenData as string;
+      }
+
+      // Update quote status with share token
       await updateQuote(quoteId, { 
         status: 'sent', 
-        sentAt: new Date().toISOString() 
+        sentAt: new Date().toISOString(),
+        share_token: shareToken
       });
 
       // Deduct credit/increment counter
       await deductQuoteCredit(user.companyId);
-      toast.success('Quote sent successfully! Credit deducted.');
+      toast.success('Quote sent successfully! Secure link generated.');
     } catch (error) {
       console.error('Error sending quote:', error);
       toast.error('Failed to send quote. Please try again.');
@@ -168,9 +184,29 @@ export function QuotesListPage() {
                         <QuoteStatusBadge status={quote.status} />
                       </div>
                       <p className="font-medium text-white">{quote.customer.name}</p>
-                      <p className="text-sm text-slate-500">
-                        {quote.customer.postcode} • Created {format(new Date(quote.createdAt), 'dd MMM yyyy')}
-                      </p>
+                      <div className="flex items-center gap-2 text-sm text-slate-500">
+                        <span>{quote.customer.postcode}</span>
+                        <span>•</span>
+                        <span>Created {format(new Date(quote.createdAt), 'dd MMM yyyy')}</span>
+                        {quote.viewedAt && quote.status === 'viewed' && (
+                          <>
+                            <span>•</span>
+                            <span className="flex items-center gap-1 text-primary-400">
+                              <Eye className="w-3 h-3" />
+                              Viewed {format(new Date(quote.viewedAt), 'dd MMM')}
+                            </span>
+                          </>
+                        )}
+                        {quote.acceptedAt && quote.status === 'accepted' && (
+                          <>
+                            <span>•</span>
+                            <span className="flex items-center gap-1 text-success-400">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Accepted {format(new Date(quote.acceptedAt), 'dd MMM')}
+                            </span>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -236,9 +272,29 @@ export function QuotesListPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-lg font-bold text-white">£{quote.total.toLocaleString()}</p>
-                      <p className="text-xs text-slate-500">
-                        {quote.customer.postcode} • {format(new Date(quote.createdAt), 'dd MMM')}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-1 text-xs text-slate-500">
+                        <span>{quote.customer.postcode}</span>
+                        <span>•</span>
+                        <span>{format(new Date(quote.createdAt), 'dd MMM')}</span>
+                        {quote.viewedAt && quote.status === 'viewed' && (
+                          <>
+                            <span>•</span>
+                            <span className="flex items-center gap-1 text-primary-400">
+                              <Eye className="w-3 h-3" />
+                              Viewed
+                            </span>
+                          </>
+                        )}
+                        {quote.acceptedAt && quote.status === 'accepted' && (
+                          <>
+                            <span>•</span>
+                            <span className="flex items-center gap-1 text-success-400">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Accepted
+                            </span>
+                          </>
+                        )}
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>

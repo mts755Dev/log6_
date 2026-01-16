@@ -174,6 +174,11 @@ export interface Quote {
   viewedAt?: string;
   acceptedAt?: string;
   customerSignature?: string;
+  share_token?: string;
+  share_token_expires_at?: string;
+  deposit_paid?: boolean;
+  deposit_paid_at?: string;
+  stripe_payment_intent_id?: string;
 }
 
 // MIS-3002 Types
