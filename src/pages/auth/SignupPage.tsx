@@ -40,6 +40,20 @@ const roleConfig: Record<UserRole, {
     color: 'text-solar-500',
     bgColor: 'bg-solar-500/10',
   },
+  engineer: {
+    title: 'Engineer Portal',
+    subtitle: 'Field installations & commissioning',
+    icon: <Wrench className="w-6 h-6" />,
+    color: 'text-energy-500',
+    bgColor: 'bg-energy-500/10',
+  },
+  compliance_officer: {
+    title: 'Compliance Portal',
+    subtitle: 'Installation reviews & approvals',
+    icon: <CheckCircle2 className="w-6 h-6" />,
+    color: 'text-purple-500',
+    bgColor: 'bg-purple-500/10',
+  },
 };
 
 export function SignupPage() {

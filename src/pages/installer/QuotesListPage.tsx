@@ -84,7 +84,7 @@ export function QuotesListPage() {
         return;
       }
 
-      toast.info('Generating proposal pack...', { duration: 3000 });
+      toast.info('Generating proposal pack...', 3000);
 
       // 🎯 STEP 1: Generate all proposal PDFs
       const pdfResult = await generateAllProposalPdfs(quote, user.companyId);
