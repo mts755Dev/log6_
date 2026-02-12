@@ -11,6 +11,7 @@
  */
 
 import type { Quote } from '../types';
+import { supabase } from '../lib/supabase';
 
 export interface EmailRecipient {
   email: string;
@@ -39,57 +40,44 @@ export async function sendQuoteToCustomer(data: QuoteEmailData): Promise<{
   message: string;
 }> {
   try {
-    console.log('📧 Email would be sent to:', data.recipient.email);
-    console.log('🔗 Share link:', data.shareLink);
-    console.log('💰 Quote total:', data.quote.total);
-
-    // TODO: Implement actual email sending
-    // Example using Supabase Edge Function:
-    /*
-    const response = await fetch('/functions/v1/send-quote-email', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${supabaseAnonKey}`,
-      },
-      body: JSON.stringify({
+    console.log('📧 Attempting to send email to:', data.recipient.email);
+    
+    const { data: response, error } = await supabase.functions.invoke('send-quote-email', {
+      body: {
         to: data.recipient.email,
-        subject: `Your Battery Storage Quote - ${data.quote.reference}`,
+        recipientName: data.recipient.name,
+        subject: `Your Quote from ${data.companyName} - ${data.quote.reference}`,
         shareLink: data.shareLink,
-        quote: {
-          reference: data.quote.reference,
-          total: data.quote.total,
-          annualSavings: data.quote.annualSavings,
-          validUntil: data.quote.validUntil,
-        },
-        company: {
-          name: data.companyName,
-          email: data.companyEmail,
-          phone: data.companyPhone,
-        },
-      }),
+        quoteReference: data.quote.reference,
+        quoteTotal: data.quote.total,
+        annualSavings: data.quote.annualSavings,
+        companyName: data.companyName,
+        companyEmail: data.companyEmail,
+        companyPhone: data.companyPhone,
+      },
     });
 
-    if (!response.ok) {
-      throw new Error('Failed to send email');
+    if (error) {
+      console.error('Supabase function error:', error);
+      // If it's a 403/404, the function doesn't exist - provide helpful feedback
+      if (error.message.includes('403') || error.message.includes('404') || error.message.includes('non-2xx')) {
+        return {
+          success: false,
+          message: 'Email service not configured. Please use WhatsApp or copy the link manually.',
+        };
+      }
+      throw new Error(error.message || 'Failed to send email');
     }
 
     return {
       success: true,
       message: 'Email sent successfully',
     };
-    */
-
-    // For now, return success (email functionality to be implemented)
-    return {
-      success: true,
-      message: 'Email notification queued (email integration pending)',
-    };
   } catch (error) {
     console.error('Error sending email:', error);
     return {
       success: false,
-      message: error instanceof Error ? error.message : 'Failed to send email',
+      message: 'Email service not available. Use WhatsApp or copy the link to send manually.',
     };
   }
 }

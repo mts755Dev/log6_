@@ -20,6 +20,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { format } from 'date-fns';
 import { supabase } from '../../lib/supabase';
+import { generateAllProposalPdfs } from '../../services/proposalPdfGenerator';
 
 export function QuotesListPage() {
   const navigate = useNavigate();
@@ -61,7 +62,7 @@ export function QuotesListPage() {
     { id: 'all', label: 'All', badge: myQuotes.length },
     { id: 'draft', label: 'Drafts', badge: myQuotes.filter(q => q.status === 'draft').length },
     { id: 'sent', label: 'Sent', badge: myQuotes.filter(q => q.status === 'sent').length },
-    { id: 'accepted', label: 'Accepted', badge: myQuotes.filter(q => q.status === 'accepted').length },
+    { id: 'deposit_paid', label: 'Deposits Paid', badge: myQuotes.filter(q => q.status === 'deposit_paid').length },
     { id: 'rejected', label: 'Rejected', badge: myQuotes.filter(q => q.status === 'rejected').length },
   ];
 
@@ -76,12 +77,60 @@ export function QuotesListPage() {
         return;
       }
 
-      // Generate secure share token if not exists
+      // Find the quote object
       const quote = quotes.find(q => q.id === quoteId);
-      let shareToken = quote?.share_token;
+      if (!quote) {
+        toast.error('Quote not found');
+        return;
+      }
 
+      toast.info('Generating proposal pack...', { duration: 3000 });
+
+      // 🎯 STEP 1: Generate all proposal PDFs
+      const pdfResult = await generateAllProposalPdfs(quote, user.companyId);
+      
+      if (!pdfResult.success) {
+        console.error('PDF generation errors:', pdfResult.errors);
+        toast.error('Some PDFs failed to generate, but continuing...');
+      }
+
+      // 🎯 STEP 2: Create document records for generated PDFs
+      for (const pdf of pdfResult.generatedPdfs) {
+        const { data: docData, error: docError } = await supabase
+          .from('documents')
+          .insert({
+            name: pdf.fileName,
+            description: `Auto-generated ${pdf.code} for quote ${quote.id.slice(0, 8)}`,
+            category: 'template',
+            file_url: pdf.fileUrl,
+            file_name: pdf.fileName,
+            version: 1,
+          })
+          .select()
+          .single();
+
+        if (!docError && docData) {
+          await supabase
+            .from('quote_documents')
+            .insert({
+              quote_id: quoteId,
+              document_id: docData.id,
+            });
+        }
+      }
+
+      // 🎯 STEP 3: Auto-attach Document Bank documents
+      const { error: attachError } = await supabase.rpc('attach_documents_to_quote', {
+        p_quote_id: quoteId
+      });
+
+      if (attachError) {
+        console.error('Error attaching Document Bank files:', attachError);
+      }
+
+      // 🎯 STEP 4: Generate share token if needed
+      let shareToken = quote.share_token;
       if (!shareToken) {
-        // Generate new token
         const { data: tokenData, error: tokenError } = await supabase
           .rpc('generate_quote_share_token');
 
@@ -89,16 +138,19 @@ export function QuotesListPage() {
         shareToken = tokenData as string;
       }
 
-      // Update quote status with share token
+      // 🎯 STEP 5: Update quote status
       await updateQuote(quoteId, { 
         status: 'sent', 
         sentAt: new Date().toISOString(),
         share_token: shareToken
       });
 
-      // Deduct credit/increment counter
+      // 🎯 STEP 6: Deduct credit
       await deductQuoteCredit(user.companyId);
-      toast.success('Quote sent successfully! Secure link generated.');
+
+      const totalDocs = pdfResult.generatedPdfs.length + (attachError ? 0 : 2);
+      toast.success(`🎉 Quote sent with ${totalDocs} documents in proposal pack!`);
+      
     } catch (error) {
       console.error('Error sending quote:', error);
       toast.error('Failed to send quote. Please try again.');
@@ -197,12 +249,12 @@ export function QuotesListPage() {
                             </span>
                           </>
                         )}
-                        {quote.acceptedAt && quote.status === 'accepted' && (
+                        {quote.depositPaidAt && quote.status === 'deposit_paid' && (
                           <>
                             <span>•</span>
                             <span className="flex items-center gap-1 text-success-400">
                               <CheckCircle2 className="w-3 h-3" />
-                              Accepted {format(new Date(quote.acceptedAt), 'dd MMM')}
+                              Deposit Paid {format(new Date(quote.depositPaidAt), 'dd MMM')}
                             </span>
                           </>
                         )}
@@ -285,12 +337,12 @@ export function QuotesListPage() {
                             </span>
                           </>
                         )}
-                        {quote.acceptedAt && quote.status === 'accepted' && (
+                        {quote.depositPaidAt && quote.status === 'deposit_paid' && (
                           <>
                             <span>•</span>
                             <span className="flex items-center gap-1 text-success-400">
                               <CheckCircle2 className="w-3 h-3" />
-                              Accepted
+                              Deposit Paid
                             </span>
                           </>
                         )}

@@ -25,6 +25,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   ): Promise<User | null> => {
     try {
       console.log('📝 Mapping user:', supabaseUser.email);
+      console.log('📝 User ID:', supabaseUser.id);
       
       // Check if operation was aborted
       if (signal?.aborted) {
@@ -32,59 +33,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
 
-      // Fetch user profile from profiles table with timeout
-      console.log('🔍 Fetching profile for:', supabaseUser.id);
+      console.log('🔍 Fetching profile for ID:', supabaseUser.id);
       
-      const fetchProfileWithTimeout = Promise.race([
-        supabase
+      // Direct query without timeout - let's see the actual error
+      const { data: profile, error, status, statusText } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', supabaseUser.id)
+        .single();
+      
+      // Log EVERYTHING for debugging
+      console.log('📊 Query response:', {
+        profile,
+        error,
+        status,
+        statusText,
+        hasProfile: !!profile,
+        profileId: profile?.id,
+        profileEmail: profile?.email,
+        profileRole: profile?.role,
+        profileIsActive: profile?.is_active,
+      });
+
+      if (error) {
+        console.error('❌ Supabase error:', error.message, error.code, error.details);
+        
+        // If profile not found, try to get ALL profiles to debug
+        console.log('🔍 Debugging: Fetching all profiles...');
+        const { data: allProfiles, error: allError } = await supabase
           .from('profiles')
-          .select('*')
-          .eq('id', supabaseUser.id)
-          .single(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
-        )
-      ]);
+          .select('id, email, role, is_active')
+          .limit(10);
+        
+        console.log('📋 All profiles in database:', allProfiles);
+        if (allError) {
+          console.error('❌ Error fetching all profiles:', allError);
+        }
+        
+        return null;
+      }
+
+      if (!profile) {
+        console.error('❌ Profile is null for user:', supabaseUser.email);
+        return null;
+      }
+
+      // Check is_active - but be lenient for now
+      if (profile.is_active === false) {
+        console.error('❌ Profile is inactive for user:', supabaseUser.email);
+        return null;
+      }
+
+      // Check company_id for installers
+      if (profile.role === 'installer' && !profile.company_id) {
+        console.error('❌ Installer profile requires company_id:', supabaseUser.email);
+        return null;
+      }
       
-      const { data: profile, error } = await fetchProfileWithTimeout as any;
-
-      if (error || !profile) {
-        // Ignore abort errors
-        if (error && error.message?.includes('abort')) {
-          console.log('⚠️ Profile fetch aborted');
-          return null;
-        }
-        
-        console.warn('⚠️ Could not fetch profile from DB, using user metadata instead:', error);
-        
-        // Fallback: use user metadata if profile fetch fails
-        if (supabaseUser.user_metadata) {
-          console.log('✅ Using user metadata as fallback');
-          return {
-            id: supabaseUser.id,
-            email: supabaseUser.email!,
-            name: supabaseUser.user_metadata.full_name || supabaseUser.email!.split('@')[0],
-            role: supabaseUser.user_metadata.role as UserRole || 'installer',
-            companyId: null,
-            phone: supabaseUser.user_metadata.phone || null,
-            isActive: true,
-            createdAt: supabaseUser.created_at,
-            lastLogin: new Date().toISOString(),
-          };
-        }
-        
-        console.error('❌ Error fetching profile and no metadata available:', error);
-        return null;
-      }
-
       console.log('✅ Profile found:', profile.email, 'role:', profile.role);
-
-      // Check if user is active
-      if (!profile.is_active) {
-        console.warn('⚠️ User account is not active');
-        return null;
-      }
-
+      
       // Map to our User type
       const mappedUser = {
         id: profile.id,
@@ -98,7 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         lastLogin: new Date().toISOString(),
       };
       
-      console.log('✅ User mapped successfully:', mappedUser.email);
+      console.log('✅ User mapped successfully:', mappedUser.email, 'role:', mappedUser.role);
       return mappedUser;
     } catch (error: any) {
       // Ignore abort errors
@@ -111,29 +118,79 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Helper function to fetch profile with retry on abort
+  const fetchProfileWithRetry = async (userId: string, maxRetries = 3): Promise<any> => {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      console.log(`🔍 Fetching profile (attempt ${attempt}/${maxRetries})...`);
+      
+      // Add a small delay before each attempt to let any pending aborts settle
+      if (attempt > 1) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
+      try {
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .single();
+        
+        // If no error or error is not an abort, return the result
+        if (!profileError || !profileError.message?.includes('abort')) {
+          return { profile, profileError };
+        }
+        
+        console.log(`⚠️ Attempt ${attempt} aborted, retrying...`);
+      } catch (err: any) {
+        if (!err?.message?.includes('abort') && !err?.name?.includes('Abort')) {
+          throw err;
+        }
+        console.log(`⚠️ Attempt ${attempt} aborted, retrying...`);
+      }
+    }
+    
+    return { profile: null, profileError: { message: 'Max retries exceeded' } };
+  };
+
   // Initialize auth state on mount
   useEffect(() => {
     let mounted = true;
-    const abortController = new AbortController();
 
     const initializeAuth = async () => {
       try {
         // Check for existing session
         const { data: { session } } = await supabase.auth.getSession();
 
-        if (session?.user && mounted && !abortController.signal.aborted) {
-          const mappedUser = await mapSupabaseUserToUser(
-            session.user, 
-            session,
-            abortController.signal
-          );
-          if (mappedUser && mounted) {
+        if (session?.user && mounted) {
+          console.log('🔄 Existing session found, fetching profile...');
+          
+          // Small delay to avoid race conditions with React StrictMode
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+          if (!mounted) return;
+          
+          // Fetch profile with retry
+          const { profile, profileError } = await fetchProfileWithRetry(session.user.id);
+          
+          if (!profileError && profile && profile.is_active && mounted) {
+            const mappedUser: User = {
+              id: profile.id,
+              email: profile.email,
+              name: profile.full_name || profile.email.split('@')[0],
+              role: profile.role as UserRole,
+              companyId: profile.company_id,
+              phone: profile.phone,
+              isActive: profile.is_active,
+              createdAt: profile.created_at,
+              lastLogin: new Date().toISOString(),
+            };
             setUser(mappedUser);
+            console.log('✅ Session restored for:', mappedUser.email);
           }
         }
       } catch (error: any) {
-        // Ignore abort errors
-        if (error?.name !== 'AbortError' && !error?.message?.includes('abort')) {
+        // Ignore abort errors - they're expected in StrictMode
+        if (!error?.message?.includes('abort') && error?.name !== 'AbortError') {
           console.error('Error initializing auth:', error);
         }
       } finally {
@@ -148,37 +205,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (!mounted || abortController.signal.aborted) return;
+        if (!mounted) return;
 
-        if (event === 'SIGNED_IN' && session?.user) {
-          const mappedUser = await mapSupabaseUserToUser(
-            session.user, 
-            session,
-            abortController.signal
-          );
-          if (mappedUser && mounted) {
-            setUser(mappedUser);
-          }
-        } else if (event === 'SIGNED_OUT') {
+        console.log('🔄 Auth state change:', event);
+
+        // SKIP SIGNED_IN - login() function handles this directly now
+        // This prevents the AbortController race condition
+        if (event === 'SIGNED_IN') {
+          console.log('📝 SIGNED_IN event - login() will handle profile fetch');
+          // Don't do anything here - login() sets the user directly
+          return;
+        }
+        
+        if (event === 'SIGNED_OUT') {
           if (mounted) {
+            console.log('👋 User signed out');
             setUser(null);
           }
         } else if (event === 'TOKEN_REFRESHED' && session?.user) {
-          const mappedUser = await mapSupabaseUserToUser(
-            session.user, 
-            session,
-            abortController.signal
-          );
-          if (mappedUser && mounted) {
-            setUser(mappedUser);
-          }
+          console.log('🔄 Token refreshed, keeping existing user session');
+          // Don't re-fetch profile on token refresh - just keep existing user
         }
       }
     );
 
     return () => {
       mounted = false;
-      abortController.abort();
       subscription.unsubscribe();
     };
   }, []);
@@ -206,9 +258,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         console.log('✅ Login successful, user:', data.user.email);
         
-        // The onAuthStateChange listener will handle setting the user
-        // Just wait a bit for it to process
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Wait a moment for any pending operations to settle
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Fetch profile with retry logic
+        const { profile, profileError } = await fetchProfileWithRetry(data.user.id);
+        
+        console.log('📊 Profile fetch result:', { profile, profileError });
+        
+        if (profileError) {
+          console.error('❌ Profile fetch error:', profileError.message);
+          return false;
+        }
+        
+        if (!profile) {
+          console.error('❌ No profile found for user');
+          return false;
+        }
+        
+        if (!profile.is_active) {
+          console.error('❌ Profile is inactive');
+          return false;
+        }
+        
+        // Check role matches expected
+        if (profile.role !== expectedRole) {
+          console.error('❌ Role mismatch. Expected:', expectedRole, 'Got:', profile.role);
+          return false;
+        }
+        
+        // Check company_id for installers
+        if (profile.role === 'installer' && !profile.company_id) {
+          console.error('❌ Installer must have company_id');
+          return false;
+        }
+        
+        // Map profile to user
+        const mappedUser: User = {
+          id: profile.id,
+          email: profile.email,
+          name: profile.full_name || profile.email.split('@')[0],
+          role: profile.role as UserRole,
+          companyId: profile.company_id,
+          phone: profile.phone,
+          isActive: profile.is_active,
+          createdAt: profile.created_at,
+          lastLogin: new Date().toISOString(),
+        };
+        
+        console.log('✅ User mapped:', mappedUser.email, 'role:', mappedUser.role);
+        setUser(mappedUser);
         
         return true;
       } catch (error) {

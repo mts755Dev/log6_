@@ -49,6 +49,7 @@ export function CompaniesPage() {
     postcode: '',
     mcsNumber: '',
     isUmbrellaScheme: false,
+    insurance_provider: null as 'QANW' | 'HICE' | 'REC' | null,
     paymentModel: 'subscription' as 'pay-as-you-go' | 'subscription',
     creditBalance: 0,
     creditPrice: 3.00,
@@ -79,6 +80,7 @@ export function CompaniesPage() {
         postcode: company.postcode,
         mcsNumber: company.mcs_number,
         isUmbrellaScheme: company.is_umbrella_scheme,
+        insurance_provider: company.insurance_provider,
         paymentModel: company.payment_model || 'subscription',
         creditBalance: company.credit_balance || 0,
         creditPrice: parseFloat(company.credit_price) || 3.00,
@@ -148,6 +150,7 @@ export function CompaniesPage() {
           postcode: formData.postcode,
           mcs_number: formData.mcsNumber || null,
           is_umbrella_scheme: formData.isUmbrellaScheme,
+          insurance_provider: formData.insurance_provider || null,
           payment_model: formData.paymentModel,
           credit_balance: formData.paymentModel === 'pay-as-you-go' ? formData.creditBalance : 0,
           credit_price: formData.creditPrice,
@@ -191,6 +194,7 @@ export function CompaniesPage() {
           postcode: formData.postcode,
           mcs_number: formData.mcsNumber || null,
           is_umbrella_scheme: formData.isUmbrellaScheme,
+          insurance_provider: formData.insurance_provider || null,
           payment_model: formData.paymentModel,
           credit_balance: formData.creditBalance,
           credit_price: formData.creditPrice,
@@ -252,6 +256,7 @@ export function CompaniesPage() {
       postcode: company.postcode,
       mcsNumber: company.mcsNumber || '',
       isUmbrellaScheme: company.isUmbrellaScheme,
+      insurance_provider: company.insurance_provider || null,
       paymentModel: company.paymentModel || 'pay-as-you-go',
       creditBalance: company.creditBalance,
       creditPrice: company.creditPrice,
@@ -313,6 +318,7 @@ export function CompaniesPage() {
       postcode: '',
       mcsNumber: '',
       isUmbrellaScheme: false,
+      insurance_provider: null,
       paymentModel: 'subscription',
       creditBalance: 0,
       creditPrice: 3.00,
@@ -425,27 +431,13 @@ export function CompaniesPage() {
                 </div>
                 
                 {/* Payment Model Stats */}
-                {company.paymentModel === 'pay-as-you-go' ? (
-                  <div className="p-3 bg-warning-500/10 border border-warning-500/20 rounded-lg mb-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-slate-400">Credit Balance</span>
-                      <span className="text-lg font-bold text-warning-400">{company.creditBalance} credits</span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">£{company.creditPrice.toFixed(2)} per credit</p>
+                <div className="p-3 bg-primary-500/10 border border-primary-500/20 rounded-lg mb-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-400">Credit Balance</span>
+                    <span className="text-lg font-bold text-primary-400">{company.creditBalance} credits</span>
                   </div>
-                ) : (
-                  <div className="p-3 bg-primary-500/10 border border-primary-500/20 rounded-lg mb-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-slate-400">Proposals Used</span>
-                      <span className="text-lg font-bold text-primary-400">
-                        {company.proposalsUsedThisMonth} / {company.monthlyProposalLimit || '∞'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Resets: {format(new Date(company.proposalResetDate), 'dd MMM yyyy')}
-                    </p>
-                  </div>
-                )}
+                  <p className="text-xs text-slate-500 mt-1">£{company.creditPrice.toFixed(2)} per credit</p>
+                </div>
 
                 <div className="grid grid-cols-3 gap-2 mb-4">
                   <div className="p-2 bg-slate-800/50 rounded-lg text-center">
@@ -547,6 +539,26 @@ export function CompaniesPage() {
             placeholder="SW1A 1AA"
             required
           />
+
+          {/* Insurance Provider Selection */}
+          <div>
+            <label className="block text-sm font-medium text-white mb-2">
+              Insurance Provider <span className="text-xs text-slate-500">(for consumer code leaflets)</span>
+            </label>
+            <select
+              value={formData.insurance_provider || ''}
+              onChange={(e) => setFormData({ ...formData, insurance_provider: e.target.value as 'QANW' | 'HICE' | 'REC' | null })}
+              className="input"
+            >
+              <option value="">Select Insurance Provider...</option>
+              <option value="QANW">QANW</option>
+              <option value="HICE">HICE</option>
+              <option value="REC">REC</option>
+            </select>
+            <p className="text-xs text-slate-500 mt-1">
+              This determines which consumer code leaflet is attached to quotes
+            </p>
+          </div>
 
           {/* Payment Model Selection */}
           <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
@@ -756,6 +768,26 @@ export function CompaniesPage() {
             placeholder="SW1A 1AA"
             required
           />
+
+          {/* Insurance Provider Selection */}
+          <div>
+            <label className="block text-sm font-medium text-white mb-2">
+              Insurance Provider <span className="text-xs text-slate-500">(for consumer code leaflets)</span>
+            </label>
+            <select
+              value={formData.insurance_provider || ''}
+              onChange={(e) => setFormData({ ...formData, insurance_provider: e.target.value as 'QANW' | 'HICE' | 'REC' | null })}
+              className="input"
+            >
+              <option value="">Select Insurance Provider...</option>
+              <option value="QANW">QANW</option>
+              <option value="HICE">HICE</option>
+              <option value="REC">REC</option>
+            </select>
+            <p className="text-xs text-slate-500 mt-1">
+              This determines which consumer code leaflet is attached to quotes
+            </p>
+          </div>
 
           {/* Payment Model Selection */}
           <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">

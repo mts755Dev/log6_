@@ -15,6 +15,13 @@ import {
   FolderOpen,
   Shield,
   X,
+  Files,
+  FileCode,
+  Receipt,
+  Upload,
+  Wrench,
+  Briefcase,
+  Calendar as CalendarIcon,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { useAuth } from '../../contexts/AuthContext';
@@ -39,6 +46,10 @@ const navigationConfig: Record<UserRole, NavItem[]> = {
     { label: 'Companies', path: '/admin/companies', icon: <Building2 className="sidebar-icon" /> },
     { label: 'Users', path: '/admin/users', icon: <Users className="sidebar-icon" /> },
     { label: 'Products', path: '/admin/products', icon: <Package className="sidebar-icon" /> },
+    { label: 'Documents', path: '/admin/documents', icon: <Files className="sidebar-icon" /> },
+    { label: 'Templates', path: '/admin/templates', icon: <FileCode className="sidebar-icon" /> },
+    { label: 'Verification', path: '/admin/verification', icon: <Shield className="sidebar-icon" /> },
+    { label: 'Invoices', path: '/admin/invoices', icon: <Receipt className="sidebar-icon" /> },
     { label: 'All Quotes', path: '/admin/quotes', icon: <FileText className="sidebar-icon" /> },
     { label: 'Submissions', path: '/admin/submissions', icon: <ClipboardCheck className="sidebar-icon" /> },
     { label: 'Certificates', path: '/admin/certificates', icon: <Award className="sidebar-icon" /> },
@@ -48,8 +59,12 @@ const navigationConfig: Record<UserRole, NavItem[]> = {
     { label: 'Dashboard', path: '/installer', icon: <LayoutDashboard className="sidebar-icon" /> },
     { label: 'New Quote', path: '/installer/quotes/new', icon: <Calculator className="sidebar-icon" /> },
     { label: 'My Quotes', path: '/installer/quotes', icon: <FileText className="sidebar-icon" /> },
+    { label: 'Scheduler', path: '/installer/scheduler', icon: <CalendarIcon className="sidebar-icon" /> },
     { label: 'Proposals', path: '/installer/proposals', icon: <FolderOpen className="sidebar-icon" /> },
+    { label: 'Invoices', path: '/installer/invoices', icon: <Receipt className="sidebar-icon" /> },
+    { label: 'Onboarding', path: '/installer/onboarding', icon: <Upload className="sidebar-icon" /> },
     { label: 'Commissions', path: '/installer/commissions', icon: <ClipboardCheck className="sidebar-icon" /> },
+    { label: 'Engineers', path: '/installer/engineers', icon: <Users className="sidebar-icon" /> },
     { label: 'MIS-3002', path: '/installer/mis-documents', icon: <Shield className="sidebar-icon" /> },
     { label: 'Products', path: '/installer/products', icon: <Package className="sidebar-icon" /> },
     { label: 'Settings', path: '/installer/settings', icon: <Settings className="sidebar-icon" /> },
@@ -61,6 +76,17 @@ const navigationConfig: Record<UserRole, NavItem[]> = {
     { label: 'Rejected', path: '/assessor/rejected', icon: <FileText className="sidebar-icon" /> },
     { label: 'Certificates', path: '/assessor/certificates', icon: <Award className="sidebar-icon" /> },
     { label: 'Settings', path: '/assessor/settings', icon: <Settings className="sidebar-icon" /> },
+  ],
+  compliance_officer: [
+    { label: 'Dashboard', path: '/compliance/dashboard', icon: <LayoutDashboard className="sidebar-icon" /> },
+    { label: 'Pending Reviews', path: '/compliance/dashboard', icon: <ClipboardCheck className="sidebar-icon" /> },
+    { label: 'Settings', path: '/compliance/settings', icon: <Settings className="sidebar-icon" /> },
+  ],
+  engineer: [
+    { label: 'Dashboard', path: '/engineer', icon: <LayoutDashboard className="sidebar-icon" /> },
+    { label: 'My Jobs', path: '/engineer', icon: <Briefcase className="sidebar-icon" /> },
+    { label: 'Availability', path: '/engineer/availability', icon: <CalendarIcon className="sidebar-icon" /> },
+    { label: 'Settings', path: '/engineer/settings', icon: <Settings className="sidebar-icon" /> },
   ],
 };
 
@@ -88,12 +114,16 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     admin: 'Administrator',
     installer: 'Installer',
     assessor: 'Umbrella Assessor',
+    compliance_officer: 'Compliance Officer',
+    engineer: 'Field Engineer',
   };
 
   const roleColors: Record<UserRole, string> = {
     admin: 'bg-primary-500/20 text-primary-400',
     installer: 'bg-energy-500/20 text-energy-400',
     assessor: 'bg-solar-500/20 text-solar-400',
+    compliance_officer: 'bg-blue-500/20 text-blue-400',
+    engineer: 'bg-orange-500/20 text-orange-400',
   };
 
   return (

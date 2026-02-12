@@ -33,7 +33,7 @@ export function MISDocumentsPage() {
   // Get quotes that could have MIS documents generated
   const quotesForMIS = quotes.filter(q => 
     q.companyId === user?.companyId && 
-    q.status === 'accepted'
+    q.status === 'deposit_paid'
   );
 
   return (

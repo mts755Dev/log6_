@@ -24,6 +24,7 @@ import {
   CreditCard,
   ArrowRight,
   ArrowLeft,
+  Clock,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -75,13 +76,17 @@ function PaymentForm({ clientSecret, quote, customerName, customerSignature, onS
         setError(submitError.message || 'Payment failed');
         setIsProcessing(false);
       } else if (paymentIntent && paymentIntent.status === 'succeeded') {
-        // Payment succeeded! Now update quote with acceptance
+        // Payment succeeded! Update quote immediately
+        console.log('Payment succeeded, updating quote status...');
         const { error: updateError } = await supabase
           .from('quotes')
           .update({
-            status: 'accepted',
+            status: 'deposit_paid',
+            deposit_paid: true,
+            deposit_paid_at: new Date().toISOString(),
             accepted_at: new Date().toISOString(),
             customer_signature: customerSignature,
+            stripe_payment_intent_id: paymentIntent.id,
             customer: {
               ...quote.customer,
               name: customerName,
@@ -91,13 +96,17 @@ function PaymentForm({ clientSecret, quote, customerName, customerSignature, onS
 
         if (updateError) {
           console.error('Error updating quote:', updateError);
-          toast.error('Payment succeeded but failed to update quote. Please contact the installer.');
+          console.error('Update error details:', JSON.stringify(updateError));
+          // Payment succeeded but quote update failed
+          // Webhook will update it as backup
+          toast.success('Payment successful! Processing your quote...');
         } else {
-          // Payment transaction will be updated automatically via Stripe webhook
-          // No need to update it here from the client side
-          toast.success('Payment successful! Quote accepted.');
-          onSuccess();
+          console.log('Quote updated successfully to deposit_paid status');
+          toast.success('Payment successful! Deposit paid.');
         }
+        
+        // Always call onSuccess to refresh the page
+        onSuccess();
       }
     } catch (err: any) {
       console.error('Payment error:', err);
@@ -165,6 +174,7 @@ export function CustomerQuoteViewPage() {
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [company, setCompany] = useState<any>(null);
+  const [documents, setDocuments] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAccepting, setIsAccepting] = useState(false);
   const [showAcceptModal, setShowAcceptModal] = useState(false);
@@ -172,10 +182,12 @@ export function CustomerQuoteViewPage() {
   const [error, setError] = useState('');
   
   // Payment flow states
-  const [acceptanceStep, setAcceptanceStep] = useState<'signature' | 'payment'>('signature');
+  const [acceptanceStep, setAcceptanceStep] = useState<'signature' | 'payment' | 'availability'>('signature');
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [signatureData, setSignatureData] = useState<string>('');
-
+  const [selectedDates, setSelectedDates] = useState<string[]>([]);
+  const [preferredTimeSlot, setPreferredTimeSlot] = useState<'morning' | 'afternoon' | 'fullday'>('fullday');
+  const [additionalNotes, setAdditionalNotes] = useState('');
   // Fetch quote data
   useEffect(() => {
     if (quoteId && token) {
@@ -261,14 +273,40 @@ export function CustomerQuoteViewPage() {
 
       setCompany(companyData);
 
+      // Fetch attached documents
+      const { data: quoteDocuments, error: docsError } = await supabase
+        .from('quote_documents')
+        .select(`
+          *,
+          document:documents(*)
+        `)
+        .eq('quote_id', quoteId);
+
+      console.log('Quote ID:', quoteId);
+      console.log('Quote Documents Result:', quoteDocuments);
+      console.log('Quote Documents Error:', docsError);
+
+      if (quoteDocuments) {
+        const docs = quoteDocuments.map(qd => qd.document).filter(Boolean);
+        console.log('Processed Documents:', docs);
+        setDocuments(docs);
+      }
+
       // Mark as viewed if not already viewed
-      if (!quoteData.viewed_at && quoteData.status === 'sent') {
+      if (!quoteData.viewed_at && (quoteData.status === 'draft' || quoteData.status === 'sent')) {
+        const updates: any = {
+          status: 'viewed',
+          viewed_at: new Date().toISOString(),
+        };
+        
+        // If coming from draft (never sent), also set sent_at timestamp
+        if (quoteData.status === 'draft' && !quoteData.sent_at) {
+          updates.sent_at = new Date().toISOString();
+        }
+        
         await supabase
           .from('quotes')
-          .update({
-            status: 'viewed',
-            viewed_at: new Date().toISOString(),
-          })
+          .update(updates)
           .eq('id', quoteId);
       }
     } catch (err: any) {
@@ -279,7 +317,59 @@ export function CustomerQuoteViewPage() {
     }
   };
 
-  const handleProceedToPayment = async () => {
+  const handleDownload = async (doc: any) => {
+    try {
+      if (!doc || !doc.file_url) {
+        toast.error('File URL not found');
+        return;
+      }
+
+      toast.info('Preparing download...');
+      
+      // Extract the file path from the URL
+      // URL format: https://{project}.supabase.co/storage/v1/object/public/documents/{path}
+      const fileUrl = doc.file_url;
+      const fileName = doc.file_name || doc.name || 'download';
+      
+      const urlParts = fileUrl.split('/storage/v1/object/public/documents/');
+      if (urlParts.length < 2) {
+        // Fallback: just open in new tab if parsing fails
+        window.open(fileUrl, '_blank');
+        toast.success('Opening file...');
+        return;
+      }
+      
+      const filePath = urlParts[1];
+      
+      // Download file from Supabase Storage
+      const { data, error } = await supabase.storage
+        .from('documents')
+        .download(filePath);
+      
+      if (error) throw error;
+      
+      // Create blob URL and trigger download
+      const blob = new Blob([data], { type: data.type });
+      const blobUrl = window.URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      
+      // Cleanup
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+      
+      toast.success('Download started');
+    } catch (error: any) {
+      console.error('Error downloading file:', error);
+      toast.error('Failed to download file: ' + error.message);
+    }
+  };
+
+  const handleProceedToAvailability = () => {
     if (!quote || !signaturePadRef.current) return;
 
     // Validate signature
@@ -294,18 +384,43 @@ export function CustomerQuoteViewPage() {
       return;
     }
 
+    // Get signature as base64
+    const signature = signaturePadRef.current.toDataURL();
+    setSignatureData(signature);
+
+    // Move to availability step
+    setAcceptanceStep('availability');
+  };
+
+  const handleProceedToPayment = async () => {
+    if (selectedDates.length === 0) {
+      toast.error('Please select at least one available date');
+      return;
+    }
+
     setIsAccepting(true);
 
     try {
-      // Get signature as base64
-      const signature = signaturePadRef.current.toDataURL();
-      setSignatureData(signature);
+      // Store availability in the quote first
+      const { error: availabilityError } = await supabase
+        .from('quotes')
+        .update({
+          customer_availability: {
+            dates: selectedDates,
+            timeSlot: preferredTimeSlot,
+            notes: additionalNotes,
+            submittedAt: new Date().toISOString(),
+          },
+        })
+        .eq('id', quote?.id);
+
+      if (availabilityError) throw availabilityError;
 
       // Create payment intent via edge function
       const { data, error } = await supabase.functions.invoke('create-quote-deposit-payment', {
         body: {
-          quoteId: quote.id,
-          depositAmount: quote.deposit,
+          quoteId: quote?.id,
+          depositAmount: quote?.deposit,
         },
       });
 
@@ -313,9 +428,10 @@ export function CustomerQuoteViewPage() {
 
       setClientSecret(data.clientSecret);
       setAcceptanceStep('payment');
+      toast.success('Availability saved! Proceed to payment.');
     } catch (err: any) {
-      console.error('Error creating payment:', err);
-      toast.error(err.message || 'Failed to initialize payment');
+      console.error('Error:', err);
+      toast.error(err.message || 'Failed to proceed');
     } finally {
       setIsAccepting(false);
     }
@@ -324,16 +440,17 @@ export function CustomerQuoteViewPage() {
   const handlePaymentSuccess = async () => {
     // Refresh quote to show accepted status
     await fetchQuote();
+    
+    // Close modal and reset
     setShowAcceptModal(false);
     setAcceptanceStep('signature');
     setClientSecret(null);
     setSignatureData('');
-    toast.success('Payment successful! Quote accepted. The installer will contact you shortly.');
-  };
-
-  const handleBackToSignature = () => {
-    setAcceptanceStep('signature');
-    setClientSecret(null);
+    setSelectedDates([]);
+    setPreferredTimeSlot('fullday');
+    setAdditionalNotes('');
+    
+    toast.success('Payment successful! Thank you. The installer will contact you shortly.');
   };
 
   const clearSignature = () => {
@@ -368,7 +485,7 @@ export function CustomerQuoteViewPage() {
   }
 
   const isExpired = new Date(quote.validUntil) < new Date();
-  const canAccept = quote.status !== 'accepted' && !isExpired;
+  const canAccept = quote.status !== 'deposit_paid' && !isExpired;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
@@ -386,10 +503,10 @@ export function CustomerQuoteViewPage() {
               <p className="text-xs text-slate-500">Battery Storage Proposal</p>
             </div>
           </div>
-          {quote.status === 'accepted' ? (
+          {quote.status === 'deposit_paid' ? (
             <Badge className="bg-success-500/20 text-success-400 border-success-500/30">
               <Check className="w-3 h-3 mr-1" />
-              Accepted
+              Deposit Paid
             </Badge>
           ) : isExpired ? (
             <Badge className="bg-red-500/20 text-red-400 border-red-500/30">Expired</Badge>
@@ -665,8 +782,8 @@ export function CustomerQuoteViewPage() {
           </motion.div>
         )}
 
-        {/* Already Accepted */}
-        {quote.status === 'accepted' && (
+        {/* Deposit Paid */}
+        {quote.status === 'deposit_paid' && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -675,15 +792,75 @@ export function CustomerQuoteViewPage() {
             <Card className="bg-gradient-to-br from-success-500/20 to-success-600/10 border-success-500/30">
               <div className="text-center py-6">
                 <Check className="w-16 h-16 text-success-400 mx-auto mb-4" />
-                <h3 className="text-2xl font-bold text-white mb-2">Quote Accepted!</h3>
+                <h3 className="text-2xl font-bold text-white mb-2">Deposit Paid!</h3>
                 <p className="text-slate-300 mb-4">
-                  Thank you for accepting this quote. We'll be in touch shortly to schedule your installation.
+                  Thank you for your payment. The installer will contact you shortly to schedule the installation.
                 </p>
-                {quote.acceptedAt && (
+                {quote.depositPaidAt && (
                   <p className="text-sm text-slate-500">
-                    Accepted on {format(new Date(quote.acceptedAt), 'dd MMMM yyyy \'at\' HH:mm')}
+                    Deposit paid on {format(new Date(quote.depositPaidAt), 'dd MMMM yyyy \'at\' HH:mm')}
                   </p>
                 )}
+              </div>
+            </Card>
+          </motion.div>
+        )}
+
+        {/* Proposal Pack Documents */}
+        {documents.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.6 }}
+          >
+            <Card>
+              <div className="flex items-center gap-3 mb-6">
+                <FileText className="w-6 h-6 text-primary-400" />
+                <div>
+                  <h2 className="text-2xl font-bold text-white">Proposal Pack Documents</h2>
+                  <p className="text-slate-400">Additional documents included with your proposal</p>
+                </div>
+              </div>
+
+              <div className="grid gap-3">
+                {documents.map((doc: any, index: number) => (
+                  <motion.div
+                    key={doc.id}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                    className="flex items-center justify-between p-4 bg-slate-800/50 rounded-lg hover:bg-slate-800 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-primary-500/10 rounded-lg">
+                        <FileText className="w-5 h-5 text-primary-400" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-white">{doc.name}</p>
+                        {doc.description && (
+                          <p className="text-sm text-slate-400">{doc.description}</p>
+                        )}
+                        <p className="text-xs text-slate-500 mt-1">
+                          {doc.file_size ? `${(doc.file_size / 1024).toFixed(1)} KB` : ''} • {doc.file_name}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      leftIcon={<Download className="w-4 h-4" />}
+                      onClick={() => handleDownload(doc)}
+                    >
+                      Download
+                    </Button>
+                  </motion.div>
+                ))}
+              </div>
+
+              <div className="mt-4 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                <p className="text-sm text-blue-400">
+                  <strong>Note:</strong> These documents are part of your complete proposal pack and provide important information about your installation, warranties, and compliance.
+                </p>
               </div>
             </Card>
           </motion.div>
@@ -721,7 +898,11 @@ export function CustomerQuoteViewPage() {
           setClientSecret(null);
           setSignatureData('');
         }}
-        title={acceptanceStep === 'signature' ? 'Accept Quote' : 'Pay Deposit'}
+        title={
+          acceptanceStep === 'signature' ? 'Accept Quote' : 
+          acceptanceStep === 'availability' ? 'Select Availability' : 
+          'Pay Deposit'
+        }
         size="lg"
       >
         <div className="space-y-6">
@@ -731,16 +912,31 @@ export function CustomerQuoteViewPage() {
               <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                 acceptanceStep === 'signature' ? 'bg-primary-500/20 border-2 border-primary-500' : 'bg-success-500'
               }`}>
-                {acceptanceStep === 'payment' ? <Check className="w-5 h-5 text-white" /> : '1'}
+                {acceptanceStep !== 'signature' ? <Check className="w-5 h-5 text-white" /> : '1'}
               </div>
               <span className="text-sm font-medium">Signature</span>
+            </div>
+            <div className="w-12 h-0.5 bg-slate-700"></div>
+            <div className={`flex items-center gap-2 ${
+              acceptanceStep === 'availability' ? 'text-primary-400' : 
+              acceptanceStep === 'payment' ? 'text-success-400' : 
+              'text-slate-500'
+            }`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                acceptanceStep === 'availability' ? 'bg-primary-500/20 border-2 border-primary-500' : 
+                acceptanceStep === 'payment' ? 'bg-success-500' :
+                'bg-slate-700'
+              }`}>
+                {acceptanceStep === 'payment' ? <Check className="w-5 h-5 text-white" /> : '2'}
+              </div>
+              <span className="text-sm font-medium">Availability</span>
             </div>
             <div className="w-12 h-0.5 bg-slate-700"></div>
             <div className={`flex items-center gap-2 ${acceptanceStep === 'payment' ? 'text-primary-400' : 'text-slate-500'}`}>
               <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                 acceptanceStep === 'payment' ? 'bg-primary-500/20 border-2 border-primary-500' : 'bg-slate-700'
               }`}>
-                2
+                3
               </div>
               <span className="text-sm font-medium">Payment</span>
             </div>
@@ -810,6 +1006,152 @@ export function CustomerQuoteViewPage() {
                   Cancel
                 </Button>
                 <Button
+                  onClick={handleProceedToAvailability}
+                  isLoading={isAccepting}
+                  rightIcon={<ArrowRight className="w-4 h-4" />}
+                  className="flex-1"
+                >
+                  Continue
+                </Button>
+              </div>
+            </>
+          ) : acceptanceStep === 'availability' ? (
+            // Step 2: Availability Selection
+            <>
+              <p className="text-slate-300">
+                Please select the dates when you're available for the installation. This helps us schedule at a time convenient for you.
+              </p>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-3">
+                  Select Available Dates (Select multiple dates)
+                </label>
+                <input
+                  type="date"
+                  min={new Date().toISOString().split('T')[0]}
+                  onChange={(e) => {
+                    const date = e.target.value;
+                    if (date && !selectedDates.includes(date)) {
+                      setSelectedDates([...selectedDates, date]);
+                    }
+                  }}
+                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-lg text-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/50 outline-none"
+                />
+                
+                {/* Display selected dates */}
+                {selectedDates.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-xs text-slate-400 mb-2">Selected Dates:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedDates.map((date, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center gap-2 bg-primary-500/20 border border-primary-500/30 rounded-lg px-3 py-2"
+                        >
+                          <Calendar className="w-4 h-4 text-primary-400" />
+                          <span className="text-sm text-white">
+                            {format(new Date(date), 'dd MMM yyyy')}
+                          </span>
+                          <button
+                            onClick={() => setSelectedDates(selectedDates.filter((_, i) => i !== index))}
+                            className="ml-2 text-slate-400 hover:text-red-400"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-3">
+                  Preferred Time Slot
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  <button
+                    onClick={() => setPreferredTimeSlot('morning')}
+                    className={`p-4 rounded-lg border-2 transition-all ${
+                      preferredTimeSlot === 'morning'
+                        ? 'border-primary-500 bg-primary-500/20'
+                        : 'border-slate-700 bg-slate-800 hover:border-slate-600'
+                    }`}
+                  >
+                    <Sun className={`w-6 h-6 mx-auto mb-2 ${
+                      preferredTimeSlot === 'morning' ? 'text-primary-400' : 'text-slate-400'
+                    }`} />
+                    <p className={`text-sm font-medium ${
+                      preferredTimeSlot === 'morning' ? 'text-white' : 'text-slate-400'
+                    }`}>
+                      Morning
+                    </p>
+                    <p className="text-xs text-slate-500">8AM - 12PM</p>
+                  </button>
+
+                  <button
+                    onClick={() => setPreferredTimeSlot('afternoon')}
+                    className={`p-4 rounded-lg border-2 transition-all ${
+                      preferredTimeSlot === 'afternoon'
+                        ? 'border-primary-500 bg-primary-500/20'
+                        : 'border-slate-700 bg-slate-800 hover:border-slate-600'
+                    }`}
+                  >
+                    <Sun className={`w-6 h-6 mx-auto mb-2 ${
+                      preferredTimeSlot === 'afternoon' ? 'text-primary-400' : 'text-slate-400'
+                    }`} />
+                    <p className={`text-sm font-medium ${
+                      preferredTimeSlot === 'afternoon' ? 'text-white' : 'text-slate-400'
+                    }`}>
+                      Afternoon
+                    </p>
+                    <p className="text-xs text-slate-500">12PM - 5PM</p>
+                  </button>
+
+                  <button
+                    onClick={() => setPreferredTimeSlot('fullday')}
+                    className={`p-4 rounded-lg border-2 transition-all ${
+                      preferredTimeSlot === 'fullday'
+                        ? 'border-primary-500 bg-primary-500/20'
+                        : 'border-slate-700 bg-slate-800 hover:border-slate-600'
+                    }`}
+                  >
+                    <Clock className={`w-6 h-6 mx-auto mb-2 ${
+                      preferredTimeSlot === 'fullday' ? 'text-primary-400' : 'text-slate-400'
+                    }`} />
+                    <p className={`text-sm font-medium ${
+                      preferredTimeSlot === 'fullday' ? 'text-white' : 'text-slate-400'
+                    }`}>
+                      Full Day
+                    </p>
+                    <p className="text-xs text-slate-500">Flexible</p>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Additional Notes (Optional)
+                </label>
+                <textarea
+                  value={additionalNotes}
+                  onChange={(e) => setAdditionalNotes(e.target.value)}
+                  rows={3}
+                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-lg text-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/50 outline-none resize-none"
+                  placeholder="Any specific requirements or preferences for the installation day?"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <Button
+                  variant="secondary"
+                  onClick={() => setAcceptanceStep('signature')}
+                  leftIcon={<ArrowLeft className="w-4 h-4" />}
+                  className="flex-1"
+                >
+                  Back
+                </Button>
+                <Button
                   onClick={handleProceedToPayment}
                   isLoading={isAccepting}
                   rightIcon={<ArrowRight className="w-4 h-4" />}
@@ -820,7 +1162,7 @@ export function CustomerQuoteViewPage() {
               </div>
             </>
           ) : (
-            // Step 2: Payment
+            // Step 3: Payment
             <>
               {clientSecret && quote ? (
                 <Elements stripe={stripePromise} options={{ clientSecret }}>
@@ -830,7 +1172,7 @@ export function CustomerQuoteViewPage() {
                     customerName={customerName}
                     customerSignature={signatureData}
                     onSuccess={handlePaymentSuccess}
-                    onBack={handleBackToSignature}
+                    onBack={() => setAcceptanceStep('availability')}
                   />
                 </Elements>
               ) : (

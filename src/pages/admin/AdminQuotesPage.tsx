@@ -91,7 +91,7 @@ export function AdminQuotesPage() {
     total: quotes.length,
     draft: quotes.filter((q) => q.status === 'draft').length,
     sent: quotes.filter((q) => q.status === 'sent').length,
-    accepted: quotes.filter((q) => q.status === 'accepted').length,
+    deposit_paid: quotes.filter((q) => q.status === 'deposit_paid').length,
     rejected: quotes.filter((q) => q.status === 'rejected').length,
   };
 
@@ -163,11 +163,11 @@ export function AdminQuotesPage() {
               Sent
             </Button>
             <Button
-              variant={statusFilter === 'accepted' ? 'primary' : 'secondary'}
+              variant={statusFilter === 'deposit_paid' ? 'primary' : 'secondary'}
               size="sm"
-              onClick={() => setStatusFilter('accepted')}
+              onClick={() => setStatusFilter('deposit_paid')}
             >
-              Accepted
+              Deposits Paid
             </Button>
           </div>
         </div>

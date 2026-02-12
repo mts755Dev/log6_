@@ -318,11 +318,11 @@ export function SignupPage() {
           // Upload other certificates
           if (documents.certificates) {
             console.log('Uploading certificates...');
-            const version = await getNextDocumentVersion(userId, 'certificates');
-            const filePath = await uploadDocument(documents.certificates, userId, 'certificates', version);
+            const version = await getNextDocumentVersion(userId, 'course_certificates');
+            const filePath = await uploadDocument(documents.certificates, userId, 'course_certificates', version);
             await saveDocumentMetadata(
               userId,
-              'certificates',
+              'course_certificates',
               documents.certificates.name,
               filePath,
               documents.certificates.size,
@@ -363,11 +363,11 @@ export function SignupPage() {
           // Upload consumer code
           if (documents.consumerCode) {
             console.log('Uploading consumer code...');
-            const version = await getNextDocumentVersion(userId, 'consumer_code');
-            const filePath = await uploadDocument(documents.consumerCode, userId, 'consumer_code', version);
+            const version = await getNextDocumentVersion(userId, 'consumer_code_membership');
+            const filePath = await uploadDocument(documents.consumerCode, userId, 'consumer_code_membership', version);
             await saveDocumentMetadata(
               userId,
-              'consumer_code',
+              'consumer_code_membership',
               documents.consumerCode.name,
               filePath,
               documents.consumerCode.size,
@@ -378,11 +378,11 @@ export function SignupPage() {
           // Upload insurance backed guarantee
           if (documents.insuranceBackedGuarantee) {
             console.log('Uploading insurance backed guarantee...');
-            const version = await getNextDocumentVersion(userId, 'insurance_backed_guarantee');
-            const filePath = await uploadDocument(documents.insuranceBackedGuarantee, userId, 'insurance_backed_guarantee', version);
+            const version = await getNextDocumentVersion(userId, 'ibg_certificate');
+            const filePath = await uploadDocument(documents.insuranceBackedGuarantee, userId, 'ibg_certificate', version);
             await saveDocumentMetadata(
               userId,
-              'insurance_backed_guarantee',
+              'ibg_certificate',
               documents.insuranceBackedGuarantee.name,
               filePath,
               documents.insuranceBackedGuarantee.size,
@@ -393,11 +393,11 @@ export function SignupPage() {
           // Upload waste license if applicable
           if (documents.useExternalWasteCarrier === 'yes' && documents.wasteLicense) {
             console.log('Uploading waste license...');
-            const version = await getNextDocumentVersion(userId, 'waste_license');
-            const filePath = await uploadDocument(documents.wasteLicense, userId, 'waste_license', version);
+            const version = await getNextDocumentVersion(userId, 'waste_carrier_license');
+            const filePath = await uploadDocument(documents.wasteLicense, userId, 'waste_carrier_license', version);
             await saveDocumentMetadata(
               userId,
-              'waste_license',
+              'waste_carrier_license',
               documents.wasteLicense.name,
               filePath,
               documents.wasteLicense.size,

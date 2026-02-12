@@ -11,6 +11,9 @@ import {
   Calculator,
   Send,
   Eye,
+  CreditCard,
+  Calendar,
+  Wrench,
 } from 'lucide-react';
 import { Card, StatCard } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -55,13 +58,18 @@ export function InstallerDashboard() {
   const myQuotes = quotes.filter(q => q.companyId === user?.companyId);
   
   const totalQuotes = myQuotes.length;
-  const acceptedQuotes = myQuotes.filter(q => q.status === 'accepted');
+  const depositPaidQuotes = myQuotes.filter(q => q.status === 'deposit_paid'); // Ready to schedule
   const pendingQuotes = myQuotes.filter(q => q.status === 'sent' || q.status === 'viewed');
   const draftQuotes = myQuotes.filter(q => q.status === 'draft');
   
-  const totalValue = acceptedQuotes.reduce((sum, q) => sum + q.total, 0);
-  const totalMargin = acceptedQuotes.reduce((sum, q) => sum + q.margin, 0);
-  const conversionRate = totalQuotes > 0 ? ((acceptedQuotes.length / totalQuotes) * 100).toFixed(1) : '0';
+  // ✨ Phase 5A: Job status filters
+  const scheduledQuotes = myQuotes.filter(q => q.status === 'scheduled');
+  const inProgressQuotes = myQuotes.filter(q => q.status === 'in_progress' || q.status === 'completed');
+  const awaitingComplianceQuotes = myQuotes.filter(q => q.status === 'commissioning' || q.status === 'compliance_review');
+  
+  const totalValue = depositPaidQuotes.reduce((sum, q) => sum + q.total, 0);
+  const totalMargin = depositPaidQuotes.reduce((sum, q) => sum + q.margin, 0);
+  const conversionRate = totalQuotes > 0 ? ((depositPaidQuotes.length / totalQuotes) * 100).toFixed(1) : '0';
 
   // Monthly data for chart
   const monthlyData = [
@@ -88,7 +96,7 @@ export function InstallerDashboard() {
         </Link>
       </div>
 
-      {/* Quick Stats */}
+      {/* Quick Stats - Row 1 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Total Quotes"
@@ -98,8 +106,8 @@ export function InstallerDashboard() {
           icon={<FileText className="w-6 h-6" />}
         />
         <StatCard
-          title="Accepted"
-          value={acceptedQuotes.length}
+          title="Deposits Paid"
+          value={depositPaidQuotes.length}
           change={`${conversionRate}% conversion`}
           changeType="positive"
           icon={<CheckCircle2 className="w-6 h-6" />}
@@ -119,6 +127,40 @@ export function InstallerDashboard() {
           icon={<TrendingUp className="w-6 h-6" />}
         />
       </div>
+
+      {/* Phase 5A: Job Pipeline Stats */}
+      {(depositPaidQuotes.length > 0 || scheduledQuotes.length > 0 || inProgressQuotes.length > 0 || awaitingComplianceQuotes.length > 0) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <StatCard
+            title="Deposits Paid"
+            value={depositPaidQuotes.length}
+            change="Ready to schedule"
+            changeType="positive"
+            icon={<CreditCard className="w-6 h-6 text-emerald-400" />}
+          />
+          <StatCard
+            title="Scheduled"
+            value={scheduledQuotes.length}
+            change="Upcoming installations"
+            changeType="neutral"
+            icon={<Calendar className="w-6 h-6 text-purple-400" />}
+          />
+          <StatCard
+            title="In Progress"
+            value={inProgressQuotes.length}
+            change="Active installations"
+            changeType="neutral"
+            icon={<Wrench className="w-6 h-6 text-orange-400" />}
+          />
+          <StatCard
+            title="Awaiting Compliance"
+            value={awaitingComplianceQuotes.length}
+            change="Pending review"
+            changeType="neutral"
+            icon={<CheckCircle2 className="w-6 h-6 text-indigo-400" />}
+          />
+        </div>
+      )}
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

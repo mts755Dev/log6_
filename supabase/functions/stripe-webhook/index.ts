@@ -106,6 +106,7 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
     const { error: quoteError } = await supabaseAdmin
       .from('quotes')
       .update({
+        status: 'deposit_paid', // ✨ Update status for job tracking
         deposit_paid: true,
         deposit_paid_at: new Date().toISOString(),
         stripe_payment_intent_id: paymentIntent.id,
@@ -115,7 +116,7 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
     if (quoteError) {
       console.error('Error updating quote:', quoteError)
     } else {
-      console.log('Quote deposit marked as paid')
+      console.log('Quote deposit marked as paid, status updated to deposit_paid')
     }
 
     // Optionally: Send notification to installer

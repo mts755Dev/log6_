@@ -47,7 +47,7 @@ export function AdminDashboard() {
 
   const activeCompanies = companies.filter(c => c.subscriptionStatus === 'active' || c.subscriptionStatus === 'trial').length;
   const totalQuoteValue = quotes.reduce((sum, q) => sum + q.total, 0);
-  const acceptedQuotes = quotes.filter(q => q.status === 'accepted').length;
+  const depositsPaid = quotes.filter(q => q.status === 'deposit_paid').length;
   const pendingReviews = commissions.filter(c => c.status === 'pending_review').length;
 
   return (
@@ -77,7 +77,7 @@ export function AdminDashboard() {
         <StatCard
           title="Total Quotes"
           value={quotes.length}
-          change={`${acceptedQuotes} accepted`}
+          change={`${depositsPaid} deposits paid`}
           changeType="neutral"
           icon={<FileText className="w-6 h-6" />}
         />

@@ -68,6 +68,7 @@ interface InstallerSettings {
 export function UsersPage() {
   const toast = useToast();
   const [users, setUsers] = useState<User[]>([]);
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('all');
@@ -85,6 +86,7 @@ export function UsersPage() {
     password: '',
     fullName: '',
     role: 'installer' as UserRole,
+    companyId: '',
     phone: '',
     isActive: true,
   });
@@ -101,24 +103,53 @@ export function UsersPage() {
     wasteLicense: null as File | null,
   });
 
+  // Fetch companies
+  const fetchCompanies = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('companies')
+        .select('id, name')
+        .order('name');
+
+      if (error) throw error;
+
+      setCompanies(data || []);
+    } catch (error: any) {
+      console.error('Error fetching companies:', error);
+    }
+  };
+
   // Fetch users from Supabase
   const fetchUsers = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
+      // Fetch profiles
+      const { data: profilesData, error: profilesError } = await supabase
         .from('profiles')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (profilesError) throw profilesError;
 
-      const mappedUsers: User[] = (data as ProfileData[]).map(profile => ({
+      // Fetch companies separately
+      const { data: companiesData, error: companiesError } = await supabase
+        .from('companies')
+        .select('id, name');
+
+      if (companiesError) throw companiesError;
+
+      // Create a map of companies for quick lookup
+      const companiesMap = new Map(
+        (companiesData || []).map(c => [c.id, c.name])
+      );
+
+      const mappedUsers: User[] = (profilesData as ProfileData[]).map(profile => ({
         id: profile.id,
         email: profile.email,
         name: profile.full_name || profile.email.split('@')[0],
         role: profile.role,
         companyId: profile.company_id,
-        companyName: 'heliOS Platform', // You can fetch from companies table later
+        companyName: profile.company_id ? (companiesMap.get(profile.company_id) || 'Unknown Company') : 'No Company',
         phone: profile.phone,
         isActive: profile.is_active,
         createdAt: profile.created_at,
@@ -136,6 +167,7 @@ export function UsersPage() {
 
   useEffect(() => {
     fetchUsers();
+    fetchCompanies();
   }, []);
 
   // Fetch installer details
@@ -220,6 +252,13 @@ export function UsersPage() {
         return;
       }
 
+      // Validate company_id for engineers only
+      if (formData.role === 'engineer' && !formData.companyId) {
+        toast.error('Please select a company for the engineer');
+        setIsLoading(false);
+        return;
+      }
+
       // Create user in Supabase Auth using admin client
       const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email: formData.email,
@@ -228,6 +267,7 @@ export function UsersPage() {
         user_metadata: {
           full_name: formData.fullName,
           role: formData.role,
+          company_id: formData.role === 'engineer' ? formData.companyId : null,
           phone: formData.phone || null,
         },
       });
@@ -322,6 +362,12 @@ export function UsersPage() {
   const handleUpdateUser = async () => {
     if (!selectedUser) return;
 
+    // Validate company_id for engineers only
+    if (formData.role === 'engineer' && !formData.companyId) {
+      toast.error('Please select a company for the engineer');
+      return;
+    }
+
     try {
       setIsLoading(true);
 
@@ -329,6 +375,7 @@ export function UsersPage() {
         .from('profiles')
         .update({
           full_name: formData.fullName,
+          company_id: formData.role === 'engineer' ? formData.companyId : null,
           phone: formData.phone || null,
           is_active: formData.isActive,
         })
@@ -357,6 +404,7 @@ export function UsersPage() {
       password: '',
       fullName: user.name,
       role: user.role,
+      companyId: user.companyId || '',
       phone: user.phone || '',
       isActive: user.isActive,
     });
@@ -398,6 +446,7 @@ export function UsersPage() {
       password: '',
       fullName: '',
       role: 'installer',
+      companyId: '',
       phone: '',
       isActive: true,
     });
@@ -421,6 +470,8 @@ export function UsersPage() {
     { id: 'admin', label: 'Admins', icon: <Shield className="w-4 h-4" />, badge: users.filter(u => u.role === 'admin').length },
     { id: 'installer', label: 'Installers', icon: <Wrench className="w-4 h-4" />, badge: users.filter(u => u.role === 'installer').length },
     { id: 'assessor', label: 'Assessors', icon: <UserCheck className="w-4 h-4" />, badge: users.filter(u => u.role === 'assessor').length },
+    { id: 'compliance_officer', label: 'Compliance Officers', icon: <CheckCircle className="w-4 h-4" />, badge: users.filter(u => u.role === 'compliance_officer').length },
+    { id: 'engineer', label: 'Engineers', icon: <Wrench className="w-4 h-4" />, badge: users.filter(u => u.role === 'engineer').length },
   ];
 
   const getRoleIcon = (role: string) => {
@@ -428,6 +479,8 @@ export function UsersPage() {
       case 'admin': return <Shield className="w-4 h-4" />;
       case 'installer': return <Wrench className="w-4 h-4" />;
       case 'assessor': return <UserCheck className="w-4 h-4" />;
+      case 'compliance_officer': return <CheckCircle className="w-4 h-4" />;
+      case 'engineer': return <Wrench className="w-4 h-4" />;
       default: return <Users className="w-4 h-4" />;
     }
   };
@@ -437,11 +490,14 @@ export function UsersPage() {
       case 'admin': return 'primary';
       case 'installer': return 'success';
       case 'assessor': return 'warning';
+      case 'compliance_officer': return 'primary';
+      case 'engineer': return 'success';
       default: return 'primary';
     }
   };
 
-  const columns = [
+  // Define all possible columns
+  const allColumns = [
     {
       key: 'name',
       header: 'User',
@@ -529,6 +585,11 @@ export function UsersPage() {
       ),
     },
   ];
+
+  // Filter columns based on active tab - remove company column for compliance officers
+  const columns = activeTab === 'compliance_officer' 
+    ? allColumns.filter(col => col.key !== 'company')
+    : allColumns;
 
   return (
     <div className="space-y-6">
@@ -661,8 +722,29 @@ export function UsersPage() {
                 options={[
                   { value: 'installer', label: 'Installer' },
                   { value: 'assessor', label: 'Assessor' },
+                  { value: 'compliance_officer', label: 'Compliance Officer' },
+                  { value: 'engineer', label: 'Field Engineer' },
                 ]}
               />
+
+              {/* Company Selection - For Engineers Only */}
+              {formData.role === 'engineer' && (
+                <div className="rounded-lg p-4 bg-yellow-500/10 border border-yellow-500/30">
+                  <Select
+                    label="Company *"
+                    value={formData.companyId}
+                    onChange={(e) => setFormData({ ...formData, companyId: e.target.value })}
+                    options={companies.map(c => ({ value: c.id, label: c.name }))}
+                    placeholder="Select company..."
+                    required
+                  />
+                  <p className="text-xs mt-2 text-yellow-400">
+                    ⚠️ Engineer will only see jobs from this company
+                  </p>
+                </div>
+              )}
+
+              
 
               <Input
                 label="Phone (Optional)"
@@ -809,9 +891,10 @@ export function UsersPage() {
                 className="flex-1"
                 isLoading={isLoading}
                 disabled={
-                  !formData.email || 
-                  !formData.password || 
-                  !formData.fullName || 
+                  !formData.email ||
+                  !formData.password ||
+                  !formData.fullName ||
+                  (formData.role === 'engineer' && !formData.companyId) ||
                   (formData.role === 'installer' && addUserStep === 1 && !isInstallerDocsComplete())
                 }
               >
@@ -857,6 +940,33 @@ export function UsersPage() {
             </div>
             <p className="text-xs text-slate-500">Role cannot be changed after creation</p>
           </div>
+
+          {/* Company Selection - For Engineers Only */}
+          {formData.role === 'engineer' && (
+            <div className="bg-primary-500/5 border border-primary-500/20 rounded-lg p-4">
+              <Select
+                label="Company *"
+                value={formData.companyId}
+                onChange={(e) => setFormData({ ...formData, companyId: e.target.value })}
+                options={companies.map(c => ({ value: c.id, label: c.name }))}
+                placeholder="Select company..."
+                required
+              />
+              <p className="text-xs text-primary-400 mt-2">
+                💡 Engineer will only see jobs from this company
+              </p>
+            </div>
+          )}
+
+          {/* Info for Compliance Officers in Edit Modal */}
+          {formData.role === 'compliance_officer' && (
+            <div className="rounded-lg p-4 bg-purple-500/10 border border-purple-500/30">
+              <p className="text-sm text-purple-300 flex items-center gap-2">
+                <span className="text-2xl">🔍</span>
+                <span><strong>Independent Reviewer:</strong> This compliance officer can see and review installations from ALL companies</span>
+              </p>
+            </div>
+          )}
 
           <Input
             label="Phone (Optional)"
@@ -905,7 +1015,10 @@ export function UsersPage() {
               onClick={handleUpdateUser}
               className="flex-1"
               isLoading={isLoading}
-              disabled={!formData.fullName}
+              disabled={
+                !formData.fullName ||
+                (formData.role === 'engineer' && !formData.companyId)
+              }
             >
               Update User
             </Button>

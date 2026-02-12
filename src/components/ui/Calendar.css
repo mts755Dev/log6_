@@ -1,0 +1,163 @@
+/* Calendar Dark Theme Overrides */
+.calendar-wrapper {
+  @apply bg-slate-800 rounded-lg p-4;
+}
+
+.rbc-calendar {
+  @apply text-white;
+}
+
+.rbc-header {
+  @apply bg-slate-700 text-white border-slate-600 py-3 font-semibold;
+}
+
+.rbc-header + .rbc-header {
+  @apply border-l border-slate-600;
+}
+
+.rbc-month-view,
+.rbc-time-view,
+.rbc-agenda-view {
+  @apply border border-slate-700;
+}
+
+.rbc-month-row,
+.rbc-day-bg,
+.rbc-time-slot {
+  @apply border-slate-700;
+}
+
+.rbc-day-bg {
+  @apply bg-slate-900;
+}
+
+.rbc-day-bg.rbc-today {
+  @apply bg-primary-500/10;
+}
+
+.rbc-off-range-bg {
+  @apply bg-slate-800/50;
+}
+
+.rbc-date-cell {
+  @apply text-slate-300;
+}
+
+.rbc-date-cell.rbc-now {
+  @apply text-primary-400 font-bold;
+}
+
+.rbc-time-header-content {
+  @apply border-l border-slate-700;
+}
+
+.rbc-time-content {
+  @apply border-t border-slate-700;
+}
+
+.rbc-timeslot-group {
+  @apply border-b border-slate-700;
+}
+
+.rbc-time-slot {
+  @apply text-slate-500;
+}
+
+.rbc-current-time-indicator {
+  @apply bg-primary-500;
+}
+
+.rbc-toolbar {
+  @apply mb-4 flex flex-wrap gap-2 items-center justify-between;
+}
+
+.rbc-toolbar button {
+  @apply px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors border border-slate-600;
+}
+
+.rbc-toolbar button.rbc-active {
+  @apply bg-primary-500 border-primary-400;
+}
+
+.rbc-toolbar button:hover {
+  @apply bg-slate-600;
+}
+
+.rbc-toolbar button.rbc-active:hover {
+  @apply bg-primary-600;
+}
+
+.rbc-toolbar-label {
+  @apply text-xl font-bold text-white;
+}
+
+.rbc-event {
+  @apply shadow-sm;
+}
+
+.rbc-event:focus {
+  @apply outline-none ring-2 ring-primary-400;
+}
+
+.rbc-event-label {
+  @apply text-xs;
+}
+
+.rbc-event-content {
+  @apply text-xs;
+}
+
+.rbc-show-more {
+  @apply text-primary-400 hover:text-primary-300 text-xs;
+}
+
+.rbc-month-view .rbc-event {
+  @apply px-1 py-0.5;
+}
+
+/* Selectable slots */
+.rbc-slot-selecting {
+  @apply bg-primary-500/20 cursor-pointer;
+}
+
+.rbc-slot-selection {
+  @apply bg-primary-500/30;
+}
+
+/* Time gutter */
+.rbc-time-gutter {
+  @apply text-slate-400;
+}
+
+.rbc-allday-cell {
+  @apply bg-slate-800;
+}
+
+.rbc-agenda-view {
+  @apply bg-slate-900;
+}
+
+.rbc-agenda-view table.rbc-agenda-table {
+  @apply border-slate-700;
+}
+
+.rbc-agenda-view table.rbc-agenda-table tbody > tr > td + td {
+  @apply border-l border-slate-700;
+}
+
+.rbc-agenda-view table.rbc-agenda-table tbody > tr + tr {
+  @apply border-t border-slate-700;
+}
+
+.rbc-agenda-view table.rbc-agenda-table thead > tr > th {
+  @apply bg-slate-700 border-b-2 border-slate-600 text-white;
+}
+
+.rbc-agenda-date-cell,
+.rbc-agenda-time-cell {
+  @apply text-slate-300;
+}
+
+.rbc-agenda-event-cell {
+  @apply text-white;
+}

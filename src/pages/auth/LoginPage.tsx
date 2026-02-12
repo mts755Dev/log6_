@@ -36,6 +36,20 @@ const roleConfig: Record<UserRole, {
     color: 'text-solar-500',
     bgColor: 'bg-solar-500/10',
   },
+  compliance_officer: {
+    title: 'Compliance Portal',
+    subtitle: 'Installation reviews & approvals',
+    icon: <CheckCircle2 className="w-6 h-6" />,
+    color: 'text-primary-500',
+    bgColor: 'bg-primary-500/10',
+  },
+  engineer: {
+    title: 'Engineer Portal',
+    subtitle: 'Installation & commissioning',
+    icon: <Wrench className="w-6 h-6" />,
+    color: 'text-orange-500',
+    bgColor: 'bg-orange-500/10',
+  },
 };
 
 export function LoginPage() {
@@ -79,7 +93,15 @@ export function LoginPage() {
     try {
       const success = await login(email, password, currentRole as UserRole);
       if (success) {
-        navigate(`/${currentRole}`);
+        // Map role to correct dashboard route
+        const roleRoutes: Record<UserRole, string> = {
+          admin: '/admin',
+          installer: '/installer',
+          assessor: '/assessor',
+          compliance_officer: '/compliance/dashboard',
+          engineer: '/engineer',
+        };
+        navigate(roleRoutes[currentRole as UserRole] || `/${currentRole}`);
       } else {
         setError('Invalid credentials. Please check your email and try again.');
       }

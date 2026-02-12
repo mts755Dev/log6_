@@ -1,13 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import {
-  STORAGE_KEYS,
-  getCollection,
-  addToCollection,
-  updateInCollection,
-  removeFromCollection,
-  findInCollection,
-} from '../services/storage';
+// Removed localStorage imports - Using 100% Supabase now! ✅
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import type {
@@ -130,17 +123,44 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       setQuotes([]);
     }
     
-    // Load commissions from localStorage (will migrate to Supabase later)
-    const allCommissions = getCollection<CommissioningSubmission>(STORAGE_KEYS.COMMISSIONS);
-    
-    if (user?.role === 'admin') {
-      setCommissions(allCommissions);
-    } else if (user?.role === 'installer') {
-      setCommissions(allCommissions.filter(c => c.companyId === user.companyId));
-    } else if (user?.role === 'assessor') {
-      setCommissions(allCommissions);
-    } else {
-      setCommissions(allCommissions);
+    // Load commissions from Supabase
+    try {
+      const { data: commissionsData, error: commissionsError } = await supabase
+        .from('commissioning_submissions')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!commissionsError && commissionsData) {
+        const mappedCommissions: CommissioningSubmission[] = commissionsData.map((c: any) => ({
+          id: c.id,
+          quoteId: c.quote_id,
+          installerId: c.installer_id,
+          installerName: c.installer_name,
+          companyId: c.company_id,
+          customerName: c.customer_name,
+          customerAddress: c.customer_address,
+          systemType: c.system_type,
+          batteryCapacity: c.battery_capacity,
+          inverterPower: c.inverter_power,
+          installationDate: c.installation_date,
+          commissioningDate: c.commissioning_date,
+          testResults: c.test_results || {},
+          installationPhotos: c.installation_photos || [],
+          status: c.status,
+          reviewedBy: c.reviewed_by,
+          reviewedAt: c.reviewed_at,
+          reviewerNotes: c.reviewer_notes,
+          createdAt: c.created_at,
+          updatedAt: c.updated_at,
+          submittedAt: c.submitted_at,
+        }));
+        setCommissions(mappedCommissions);
+      } else {
+        setCommissions([]);
+      }
+    } catch (error) {
+      console.error('Error loading commissions:', error);
+      setCommissions([]);
     }
     
     // Load companies from Supabase
@@ -277,10 +297,114 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.error('Error loading inverters:', error);
     }
+
+    // Load users from Supabase profiles table with timeout
+    try {
+      const profilesPromise = supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Users fetch timeout')), 3000)
+      );
+
+      const { data: profilesData, error: profilesError } = await Promise.race([
+        profilesPromise,
+        timeoutPromise
+      ]).catch((err) => {
+        console.warn('⚠️ Users fetch timed out, loading empty array:', err);
+        return { data: [], error: err };
+      }) as any;
+
+      if (!profilesError && profilesData) {
+        const mappedUsers: User[] = profilesData.map((p: any) => ({
+          id: p.id,
+          email: p.email,
+          name: p.full_name || p.email.split('@')[0],
+          role: p.role,
+          companyId: p.company_id,
+          phone: p.phone,
+          isActive: p.is_active,
+          createdAt: p.created_at,
+          lastLogin: p.updated_at,
+        }));
+        setUsers(mappedUsers);
+      } else {
+        setUsers([]); // Set empty array if fetch fails
+      }
+    } catch (error) {
+      console.error('Error loading users:', error);
+      setUsers([]); // Set empty array on error
+    }
     
-    setUsers(getCollection<User>(STORAGE_KEYS.USERS));
-    setCertificates(getCollection<Certificate>(STORAGE_KEYS.CERTIFICATES));
-    setMisDocuments(getCollection<MIS3002Document>(STORAGE_KEYS.MIS_DOCUMENTS));
+    // Load certificates from Supabase
+    try {
+      const { data: certsData, error: certsError } = await supabase
+        .from('certificates')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!certsError && certsData) {
+        const mappedCerts: Certificate[] = certsData.map((c: any) => ({
+          id: c.id,
+          submissionId: c.submission_id,
+          quoteId: c.quote_id,
+          companyId: c.company_id,
+          installerId: c.installer_id,
+          certificateNumber: c.certificate_number,
+          certificateType: c.certificate_type,
+          fileUrl: c.file_url,
+          fileName: c.file_name,
+          issueDate: c.issue_date,
+          expiryDate: c.expiry_date,
+          status: c.status,
+          issuedBy: c.issued_by,
+          notes: c.notes,
+          createdAt: c.created_at,
+          updatedAt: c.updated_at,
+        }));
+        setCertificates(mappedCerts);
+      } else {
+        setCertificates([]);
+      }
+    } catch (error) {
+      console.error('Error loading certificates:', error);
+      setCertificates([]);
+    }
+
+    // Load MIS documents from Supabase
+    try {
+      const { data: misData, error: misError } = await supabase
+        .from('mis_3002_documents')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!misError && misData) {
+        const mappedMis: MIS3002Document[] = misData.map((m: any) => ({
+          id: m.id,
+          quoteId: m.quote_id,
+          installerId: m.installer_id,
+          companyId: m.company_id,
+          systemDetails: m.system_details || {},
+          installationDate: m.installation_date,
+          installationAddress: m.installation_address,
+          customerName: m.customer_name,
+          customerEmail: m.customer_email,
+          customerPhone: m.customer_phone,
+          status: m.status,
+          createdAt: m.created_at,
+          updatedAt: m.updated_at,
+          submittedAt: m.submitted_at,
+        }));
+        setMisDocuments(mappedMis);
+      } else {
+        setMisDocuments([]);
+      }
+    } catch (error) {
+      console.error('Error loading MIS documents:', error);
+      setMisDocuments([]);
+    }
   }, [user]);
 
   useEffect(() => {
@@ -413,91 +537,232 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     return companies.find(c => c.id === id);
   }, [companies]);
 
-  const updateCompany = useCallback((id: string, updates: Partial<Company>) => {
-    updateInCollection(STORAGE_KEYS.COMPANIES, id, updates);
-    loadData();
+  const updateCompany = useCallback(async (id: string, updates: Partial<Company>) => {
+    try {
+      const { error } = await supabase
+        .from('companies')
+        .update({
+          name: updates.name,
+          email: updates.email,
+          phone: updates.phone,
+          address: updates.address,
+          logo: updates.logo,
+          brand_color: updates.brandColor,
+          // Add other fields as needed
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+      await loadData();
+    } catch (error) {
+      console.error('Error updating company:', error);
+      throw error;
+    }
   }, [loadData]);
 
-  // User functions
-  const createUser = useCallback((userData: Omit<User, 'id' | 'createdAt'>): User => {
-    const newUser: User = {
-      ...userData,
-      id: `user-${uuidv4().slice(0, 8)}`,
-      createdAt: new Date().toISOString(),
-    };
-    addToCollection(STORAGE_KEYS.USERS, newUser);
-    loadData();
-    return newUser;
-  }, [loadData]);
-
-  const updateUser = useCallback((id: string, updates: Partial<User>) => {
-    updateInCollection(STORAGE_KEYS.USERS, id, updates);
-    loadData();
-  }, [loadData]);
-
-  const deleteUser = useCallback((id: string) => {
-    removeFromCollection(STORAGE_KEYS.USERS, id);
-    loadData();
-  }, [loadData]);
-
-  // Product functions
-  const getBattery = useCallback((id: string) => {
-    return findInCollection<BatteryProduct>(STORAGE_KEYS.PRODUCTS_BATTERIES, id);
+  // User functions (handled by Supabase auth + profiles table)
+  const createUser = useCallback(async (userData: Omit<User, 'id' | 'createdAt'>): Promise<User> => {
+    // Users are created via Supabase auth - this function is for reference only
+    throw new Error('Users should be created via Supabase Auth signup');
   }, []);
+
+  const updateUser = useCallback(async (id: string, updates: Partial<User>) => {
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          full_name: updates.name,
+          phone: updates.phone,
+          is_active: updates.isActive,
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+      await loadData();
+    } catch (error) {
+      console.error('Error updating user:', error);
+      throw error;
+    }
+  }, [loadData]);
+
+  const deleteUser = useCallback(async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ is_active: false })
+        .eq('id', id);
+
+      if (error) throw error;
+      await loadData();
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      throw error;
+    }
+  }, [loadData]);
+
+  // Product functions (fetch from Supabase)
+  const getBattery = useCallback((id: string) => {
+    return batteries.find(b => b.id === id);
+  }, [batteries]);
 
   const getInverter = useCallback((id: string) => {
-    return findInCollection<InverterProduct>(STORAGE_KEYS.PRODUCTS_INVERTERS, id);
-  }, []);
+    return inverters.find(i => i.id === id);
+  }, [inverters]);
 
-  // Commission functions
+  // Commission functions (Supabase)
   const getCommission = useCallback((id: string) => {
-    return findInCollection<CommissioningSubmission>(STORAGE_KEYS.COMMISSIONS, id);
-  }, []);
+    return commissions.find(c => c.id === id);
+  }, [commissions]);
 
-  const createCommission = useCallback((data: Omit<CommissioningSubmission, 'id' | 'createdAt' | 'updatedAt'>): CommissioningSubmission => {
-    const commission: CommissioningSubmission = {
-      ...data,
-      id: `comm-${uuidv4().slice(0, 8)}`,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    addToCollection(STORAGE_KEYS.COMMISSIONS, commission);
-    loadData();
-    return commission;
+  const createCommission = useCallback(async (data: Omit<CommissioningSubmission, 'id' | 'createdAt' | 'updatedAt'>): Promise<CommissioningSubmission> => {
+    try {
+      const { data: newCommission, error } = await supabase
+        .from('commissioning_submissions')
+        .insert([{
+          quote_id: data.quoteId,
+          installer_id: data.installerId,
+          installer_name: data.installerName,
+          company_id: data.companyId,
+          customer_name: data.customerName,
+          customer_address: data.customerAddress,
+          system_type: data.systemType,
+          battery_capacity: data.batteryCapacity,
+          inverter_power: data.inverterPower,
+          installation_date: data.installationDate,
+          commissioning_date: data.commissioningDate,
+          test_results: data.testResults,
+          installation_photos: data.installationPhotos,
+          status: data.status,
+          submitted_at: data.submittedAt,
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      await loadData();
+      
+      return {
+        ...data,
+        id: newCommission.id,
+        createdAt: newCommission.created_at,
+        updatedAt: newCommission.updated_at,
+      };
+    } catch (error) {
+      console.error('Error creating commission:', error);
+      throw error;
+    }
   }, [loadData]);
 
-  const updateCommission = useCallback((id: string, updates: Partial<CommissioningSubmission>) => {
-    updateInCollection(STORAGE_KEYS.COMMISSIONS, id, { ...updates, updatedAt: new Date().toISOString() });
-    loadData();
+  const updateCommission = useCallback(async (id: string, updates: Partial<CommissioningSubmission>) => {
+    try {
+      const { error } = await supabase
+        .from('commissioning_submissions')
+        .update({
+          status: updates.status,
+          reviewed_by: updates.reviewedBy,
+          reviewed_at: updates.reviewedAt,
+          reviewer_notes: updates.reviewerNotes,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+      await loadData();
+    } catch (error) {
+      console.error('Error updating commission:', error);
+      throw error;
+    }
   }, [loadData]);
 
-  // Certificate functions
-  const createCertificate = useCallback((data: Omit<Certificate, 'id'>): Certificate => {
-    const certificate: Certificate = {
-      ...data,
-      id: `cert-${uuidv4().slice(0, 8)}`,
-    };
-    addToCollection(STORAGE_KEYS.CERTIFICATES, certificate);
-    loadData();
-    return certificate;
+  // Certificate functions (Supabase)
+  const createCertificate = useCallback(async (data: Omit<Certificate, 'id'>): Promise<Certificate> => {
+    try {
+      const { data: newCert, error } = await supabase
+        .from('certificates')
+        .insert([{
+          submission_id: data.submissionId,
+          quote_id: data.quoteId,
+          company_id: data.companyId,
+          installer_id: data.installerId,
+          certificate_number: data.certificateNumber,
+          certificate_type: data.certificateType,
+          file_url: data.fileUrl,
+          file_name: data.fileName,
+          issue_date: data.issueDate,
+          expiry_date: data.expiryDate,
+          status: data.status,
+          issued_by: data.issuedBy,
+          notes: data.notes,
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      await loadData();
+      
+      return {
+        ...data,
+        id: newCert.id,
+      };
+    } catch (error) {
+      console.error('Error creating certificate:', error);
+      throw error;
+    }
   }, [loadData]);
 
-  // MIS Document functions
-  const createMISDocument = useCallback((data: Omit<MIS3002Document, 'id' | 'createdAt' | 'updatedAt'>): MIS3002Document => {
-    const doc: MIS3002Document = {
-      ...data,
-      id: `mis-${uuidv4().slice(0, 8)}`,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    addToCollection(STORAGE_KEYS.MIS_DOCUMENTS, doc);
-    loadData();
-    return doc;
+  // MIS Document functions (Supabase)
+  const createMISDocument = useCallback(async (data: Omit<MIS3002Document, 'id' | 'createdAt' | 'updatedAt'>): Promise<MIS3002Document> => {
+    try {
+      const { data: newDoc, error } = await supabase
+        .from('mis_3002_documents')
+        .insert([{
+          quote_id: data.quoteId,
+          installer_id: data.installerId,
+          company_id: data.companyId,
+          system_details: data.systemDetails,
+          installation_date: data.installationDate,
+          installation_address: data.installationAddress,
+          customer_name: data.customerName,
+          customer_email: data.customerEmail,
+          customer_phone: data.customerPhone,
+          status: data.status,
+          submitted_at: data.submittedAt,
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      await loadData();
+      
+      return {
+        ...data,
+        id: newDoc.id,
+        createdAt: newDoc.created_at,
+        updatedAt: newDoc.updated_at,
+      };
+    } catch (error) {
+      console.error('Error creating MIS document:', error);
+      throw error;
+    }
   }, [loadData]);
 
-  const updateMISDocument = useCallback((id: string, updates: Partial<MIS3002Document>) => {
-    updateInCollection(STORAGE_KEYS.MIS_DOCUMENTS, id, { ...updates, updatedAt: new Date().toISOString() });
-    loadData();
+  const updateMISDocument = useCallback(async (id: string, updates: Partial<MIS3002Document>) => {
+    try {
+      const { error } = await supabase
+        .from('mis_3002_documents')
+        .update({
+          status: updates.status,
+          system_details: updates.systemDetails,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+      await loadData();
+    } catch (error) {
+      console.error('Error updating MIS document:', error);
+      throw error;
+    }
   }, [loadData]);
 
   // Check if company can create a quote

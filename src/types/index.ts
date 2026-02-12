@@ -1,5 +1,5 @@
 // User & Auth Types
-export type UserRole = 'admin' | 'installer' | 'assessor';
+export type UserRole = 'admin' | 'installer' | 'assessor' | 'engineer' | 'compliance_officer';
 
 export interface User {
   id: string;
@@ -44,6 +44,9 @@ export interface Company {
   // Branding
   logo?: string;
   brandColor?: string;
+  
+  // Insurance & Compliance
+  insurance_provider?: 'QANW' | 'HICE' | 'REC' | null;
   
   // Timestamps
   createdAt: string;
@@ -97,7 +100,23 @@ export interface Manufacturer {
 }
 
 // Quote & Proposal Types
-export type QuoteStatus = 'draft' | 'sent' | 'viewed' | 'accepted' | 'rejected' | 'expired';
+export type QuoteStatus = 
+  | 'draft' 
+  | 'sent' 
+  | 'viewed' 
+  | 'accepted' 
+  | 'rejected' 
+  | 'expired'
+  | 'deposit_paid'       // ✨ Customer paid deposit
+  | 'scheduled'          // ✨ Installation date scheduled
+  | 'in_progress'        // ✨ Installation in progress
+  | 'completed'          // ✨ Installation completed
+  | 'commissioning'      // ✨ Commissioning docs uploaded
+  | 'compliance_review'  // ✨ Awaiting compliance approval
+  | 'mcs_certified'      // ✨ MCS certificate generated
+  | 'final_invoice_sent' // ✨ Final invoice sent
+  | 'closed';            // ✨ Job fully complete
+
 export type InstallationType = 'residential' | 'commercial';
 
 export interface CustomerInfo {
@@ -176,6 +195,36 @@ export interface Quote {
   customerSignature?: string;
   share_token?: string;
   share_token_expires_at?: string;
+  
+  // ✨ Phase 5A: Job Tracking Fields
+  depositPaidAt?: string;
+  scheduledAt?: string;
+  installationDate?: string;
+  installationStartedAt?: string;
+  installationCompletedAt?: string;
+  commissioningUploadedAt?: string;
+  complianceReviewedAt?: string;
+  mcsCertifiedAt?: string;
+  finalInvoiceSentAt?: string;
+  closedAt?: string;
+  
+  // Personnel assignments
+  assignedEngineerId?: string;
+  complianceOfficerId?: string;
+  
+  // Stage-specific notes
+  installationNotes?: string;
+  commissioningNotes?: string;
+  
+  // Customer availability for installation
+  customerAvailability?: {
+    dates: string[];
+    timeSlot: 'morning' | 'afternoon' | 'fullday';
+    notes?: string;
+    submittedAt: string;
+  };
+  complianceNotes?: string;
+  rejectionReason?: string;
   deposit_paid?: boolean;
   deposit_paid_at?: string;
   stripe_payment_intent_id?: string;
@@ -335,5 +384,203 @@ export interface Notification {
   createdAt: string;
 }
 
+// Document Bank Types
+export type DocumentCategory = 'consumer_code_leaflet' | 'product_datasheet' | 'template';
+export type InsuranceProvider = 'QANW' | 'HICE' | 'REC';
+export type ProductType = 'battery' | 'inverter';
+
+export interface Document {
+  id: string;
+  name: string;
+  description?: string;
+  category: DocumentCategory;
+  fileUrl: string;
+  fileName: string;
+  fileSize?: number;
+  mimeType?: string;
+  
+  // Linking fields
+  insuranceProvider?: InsuranceProvider;
+  productId?: string;
+  productType?: ProductType;
+  
+  // Metadata
+  version: number;
+  uploadedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface QuoteDocument {
+  id: string;
+  quoteId: string;
+  documentId: string;
+  document?: Document; // Populated when fetching
+  attachedAt: string;
+}
 
 
+
+// ============================================================================
+// DOCUMENT TEMPLATES
+// ============================================================================
+
+export type TemplateCategory = 'proposal' | 'contract' | 'handover' | 'invoice';
+
+export interface DocumentTemplate {
+  id: string;
+  code: string; // FO7A, F13I, F71, etc.
+  name: string;
+  description?: string;
+  category: TemplateCategory;
+  htmlContent: string;
+  cssStyles?: string;
+  mergeFields: string[]; // List of available merge fields
+  isActive: boolean;
+  autoGenerate: boolean;
+  version: number;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}export interface GeneratedDocument {
+  id: string;
+  templateId: string;
+  quoteId?: string;
+  invoiceId?: string;
+  fileName: string;
+  fileUrl: string;
+  fileSize?: number;
+  generatedBy?: string;
+  generatedAt: string;
+  mergeData?: Record<string, any>;
+}
+
+// ============================================================================
+// INVOICES
+// ============================================================================
+
+export type InvoiceType = 'deposit' | 'final';
+export type InvoiceStatus = 'pending' | 'paid' | 'overdue' | 'cancelled';
+
+export interface Invoice {
+  id: string; // INV-XXXXXX
+  quoteId: string;
+  companyId: string;
+  type: InvoiceType;
+  
+  // Customer Info
+  customerName: string;
+  customerEmail: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  
+  // Financial
+  subtotal: number;
+  vatRate: number;
+  vatAmount: number;
+  total: number;
+  lineItems: InvoiceLineItem[];
+  
+  // Payment
+  status: InvoiceStatus;
+  paymentMethod?: string;
+  paidAt?: string;
+  stripePaymentIntentId?: string;
+  
+  // Dates
+  issueDate: string;
+  dueDate: string;
+  
+  // Document
+  pdfUrl?: string;
+  
+  // Tracking
+  sentAt?: string;
+  viewedAt?: string;
+  
+  // Metadata
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InvoiceLineItem {
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+}
+
+// ============================================================================
+// INSTALLER ONBOARDING
+// ============================================================================
+
+export type OnboardingDocumentType =
+  | 'competency_cards'
+  | 'course_certificates'
+  | 'insurance'
+  | 'mcs_certificate'
+  | 'consumer_code_membership'
+  | 'ibg_certificate'
+  | 'waste_carrier_license'
+  | 'weee_license';
+
+export type OnboardingDocumentStatus = 
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'expired'
+  | 'requires_update';
+
+export type CompanyOnboardingStatus =
+  | 'pending'
+  | 'documents_submitted'
+  | 'under_review'
+  | 'approved'
+  | 'rejected'
+  | 'requires_update';
+
+export interface InstallerOnboardingDoc {
+  id: string;
+  companyId: string;
+  uploadedBy?: string;
+  documentType: OnboardingDocumentType;
+  fileName: string;
+  fileUrl: string;
+  fileSize?: number;
+  mimeType?: string;
+  issuedDate?: string;
+  expiryDate?: string;
+  referenceNumber?: string;
+  providerName?: string;
+  status: OnboardingDocumentStatus;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+  adminNotes?: string;
+  version: number;
+  isCurrent: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type NotificationType =
+  | 'expiry_warning'
+  | 'expired'
+  | 'approval_required'
+  | 'approved'
+  | 'rejected'
+  | 'update_required';
+
+export interface DocumentNotification {
+  id: string;
+  companyId: string;
+  documentId?: string;
+  userId?: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  isRead: boolean;
+  readAt?: string;
+  createdAt: string;
+}

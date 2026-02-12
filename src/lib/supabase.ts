@@ -7,9 +7,29 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('⚠️ Supabase credentials not found. Please add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your .env file.');
 }
 
+// Custom lock function that does nothing - prevents AbortError in React StrictMode
+const noOpLock = async <T>(
+  _name: string,
+  _acquireTimeout: number,
+  fn: () => Promise<T>
+): Promise<T> => {
+  return await fn();
+};
+
 export const supabase = createClient(
   supabaseUrl || 'https://placeholder.supabase.co',
-  supabaseAnonKey || 'placeholder-key'
+  supabaseAnonKey || 'placeholder-key',
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storageKey: 'logi6-auth-token',
+      storage: window.localStorage,
+      // Use no-op lock to prevent AbortError in React StrictMode
+      lock: noOpLock,
+    },
+  }
 );
 
 // Database types for TypeScript

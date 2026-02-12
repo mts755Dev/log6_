@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 
-export const STORAGE_BUCKET = 'installer-documents';
+// Use the unified 'documents' bucket for all document uploads
+export const STORAGE_BUCKET = 'documents';
 
 /**
  * Upload a file to Supabase Storage
@@ -8,24 +9,37 @@ export const STORAGE_BUCKET = 'installer-documents';
  * @param userId - The user's ID
  * @param documentType - Type of document being uploaded
  * @param version - Version number for the document
+ * @param companyId - Optional company ID (if not provided, will fetch from profile)
  * @returns The file path in storage
  */
 export async function uploadDocument(
   file: File,
   userId: string,
   documentType: string,
-  version: number = 1
+  version: number = 1,
+  companyId?: string
 ): Promise<string> {
   try {
-    // Create a unique file path with versioning
+    // Get company_id from profile if not provided
+    let finalCompanyId = companyId;
+    if (!finalCompanyId) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('company_id')
+        .eq('id', userId)
+        .single();
+      
+      finalCompanyId = profile?.company_id || userId; // Fallback to userId for safety
+    }
+
+    // Create a unique file path with company structure
     const fileExt = file.name.split('.').pop();
-    const fileName = `${documentType}_v${version}.${fileExt}`;
-    const filePath = `${userId}/${documentType}/${fileName}`;
+    const fileName = `onboarding/${finalCompanyId}/${documentType}/${Date.now()}_v${version}.${fileExt}`;
 
     // Upload file to Supabase Storage
     const { data, error } = await supabase.storage
       .from(STORAGE_BUCKET)
-      .upload(filePath, file, {
+      .upload(fileName, file, {
         cacheControl: '3600',
         upsert: true, // Allow overwriting if exists
       });
@@ -54,9 +68,9 @@ export async function getNextDocumentVersion(
 ): Promise<number> {
   try {
     const { data, error } = await supabase
-      .from('installer_documents')
+      .from('installer_onboarding_docs')
       .select('version')
-      .eq('user_id', userId)
+      .eq('uploaded_by', userId)
       .eq('document_type', documentType)
       .order('version', { ascending: false })
       .limit(1)
@@ -76,6 +90,7 @@ export async function getNextDocumentVersion(
 
 /**
  * Save document metadata to the database
+ * IMPORTANT: Now uses installer_onboarding_docs table (consolidated)
  */
 export async function saveDocumentMetadata(
   userId: string,
@@ -85,20 +100,46 @@ export async function saveDocumentMetadata(
   fileSize: number,
   version: number,
   issuedDate?: string,
-  expiryDate?: string
+  expiryDate?: string,
+  companyId?: string
 ): Promise<void> {
   try {
+    // Get company_id from profile if not provided
+    let finalCompanyId = companyId;
+    if (!finalCompanyId) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('company_id')
+        .eq('id', userId)
+        .single();
+      
+      finalCompanyId = profile?.company_id || null;
+    }
+
+    if (!finalCompanyId) {
+      throw new Error('Company ID is required to save documents');
+    }
+
+    // Get public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from(STORAGE_BUCKET)
+      .getPublicUrl(filePath);
+
     const { error } = await supabase
-      .from('installer_documents')
+      .from('installer_onboarding_docs')
       .insert({
-        user_id: userId,
+        company_id: finalCompanyId,
+        uploaded_by: userId,
         document_type: documentType,
         file_name: fileName,
-        file_path: filePath,
+        file_url: publicUrl,
         file_size: fileSize,
+        mime_type: fileName.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg',
         version: version,
         issued_date: issuedDate || null,
         expiry_date: expiryDate || null,
+        status: 'pending',
+        is_current: true,
       });
 
     if (error) {

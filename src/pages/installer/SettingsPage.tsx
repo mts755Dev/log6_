@@ -118,13 +118,14 @@ export function SettingsPage() {
 
   // Fetch user documents
   const fetchDocuments = async () => {
-    if (!user) return;
+    if (!user || !user.companyId) return;
     
     try {
       const { data, error } = await supabase
-        .from('installer_documents')
+        .from('installer_onboarding_docs')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('company_id', user.companyId)
+        .eq('is_current', true)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -348,16 +349,16 @@ export function SettingsPage() {
   };
 
   // Download document
-  const handleDocumentDownload = async (filePath: string, fileName: string) => {
+  const handleDocumentDownload = async (fileUrl: string, fileName: string) => {
     try {
-      const { data, error } = await supabase.storage
-        .from('installer-documents')
-        .download(filePath);
-
-      if (error) throw error;
-
+      // Fetch the file from the public URL
+      const response = await fetch(fileUrl);
+      if (!response.ok) throw new Error('Failed to fetch document');
+      
+      const blob = await response.blob();
+      
       // Create download link
-      const url = window.URL.createObjectURL(data);
+      const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = fileName;
@@ -776,7 +777,7 @@ export function SettingsPage() {
                               variant="secondary"
                               size="sm"
                               leftIcon={<Download className="w-4 h-4" />}
-                              onClick={() => handleDocumentDownload(doc.file_path, doc.file_name)}
+                              onClick={() => handleDocumentDownload(doc.file_url, doc.file_name)}
                             >
                               Download
                             </Button>

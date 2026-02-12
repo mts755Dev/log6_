@@ -18,16 +18,31 @@ import {
   Sun,
   PoundSterling,
   TrendingUp,
+  Copy,
+  ExternalLink,
+  Eye,
+  Send,
+  CheckCircle2,
+  Calendar,
+  Clock,
+  Loader2,
+  MessageCircle,
+  Mail,
 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
+import { Modal } from '../../components/ui/Modal';
 import { ChoosePaymentModel } from '../../components/payments/ChoosePaymentModel';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import { useToast } from '../../contexts/ToastContext';
+import { supabase } from '../../lib/supabase';
+import { generateAllProposalPdfs } from '../../services/proposalPdfGenerator';
+import { sendQuoteToCustomer } from '../../services/emailNotifications';
 import type { Quote, QuoteLineItem, ROIProjection, CustomerInfo, TariffInfo } from '../../types';
+import { format } from 'date-fns';
 
 const steps = [
   { id: 'customer', title: 'Customer Info', icon: <User className="w-5 h-5" /> },
@@ -47,6 +62,13 @@ export function NewQuotePage() {
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showGeneratingModal, setShowGeneratingModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [isGeneratingToken, setIsGeneratingToken] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [lastCreatedQuoteId, setLastCreatedQuoteId] = useState<string | null>(null);
+  const [quoteForShare, setQuoteForShare] = useState<Quote | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
 
   // Form state
@@ -231,30 +253,79 @@ export function NewQuotePage() {
   const prevStep = () => setCurrentStep(prev => Math.max(prev - 1, 0));
 
   // Submit quote
-  const handleSubmit = async (status: 'draft' | 'sent') => {
-    if (!user || !user.companyId) return;
+  const getShareLink = () => {
+    if (!shareToken || !quoteForShare) return '';
+    const baseUrl = window.location.origin;
+    return `${baseUrl}/quote/${quoteForShare.id}/${shareToken}`;
+  };
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(getShareLink());
+      toast.success('Secure link copied to clipboard!');
+    } catch (error) {
+      console.error('Error copying link:', error);
+      toast.error('Failed to copy link');
+    }
+  };
+
+  const handleOpenCustomerView = () => {
+    window.open(getShareLink(), '_blank');
+  };
+
+  const handleShareWhatsApp = () => {
+    if (!quoteForShare || !shareToken) return;
     
-    // Check if user needs to choose payment model
-    const company = getCompany(user.companyId);
-    if (company && company.subscriptionStatus === 'trial') {
-      if (company.paymentModel === 'pay-as-you-go' && company.creditBalance === 0) {
-        // Trial ended, no credits left - force payment choice
-        setShowPaymentModal(true);
-        toast.error('Trial credits used! Please purchase credits or upgrade to continue.');
-        return;
-      } else if (company.paymentModel === 'subscription' && 
-                 company.monthlyProposalLimit !== null && 
-                 company.proposalsUsedThisMonth >= company.monthlyProposalLimit) {
-        // Trial ended, proposal limit reached - force payment choice
-        setShowPaymentModal(true);
-        toast.error('Trial limit reached! Please upgrade your plan to continue.');
-        return;
+    const link = getShareLink();
+    const customerPhone = customer.phone.replace(/\s+/g, '');
+    const message = `Hi ${customer.name}, here is your solar quote from ${user?.companyName || 'heliOS'}: ${link}`;
+    const whatsappUrl = `https://wa.me/${customerPhone}?text=${encodeURIComponent(message)}`;
+    
+    window.open(whatsappUrl, '_blank');
+  };
+
+  const handleSendEmail = async () => {
+    if (!quoteForShare || !shareToken || !user) return;
+    
+    setIsSendingEmail(true);
+    try {
+      const result = await sendQuoteToCustomer({
+        quote: quoteForShare,
+        recipient: {
+          email: customer.email,
+          name: customer.name,
+        },
+        shareLink: getShareLink(),
+        companyName: user.companyName || 'heliOS Platform',
+        companyEmail: user.email || '',
+        companyPhone: '+44 782346382', // Placeholder if not in user object
+      });
+
+      if (result.success) {
+        toast.success('Email sent successfully to customer!');
+      } else {
+        toast.error(result.message || 'Failed to send email');
       }
+    } catch (error) {
+      console.error('Error in handleSendEmail:', error);
+      toast.error('An unexpected error occurred');
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
+  const handleSubmit = async (status: 'draft' | 'sent') => {
+    if (!user || !user.companyId) {
+      toast.error('Please log in to create a quote');
+      return;
     }
 
-    setIsSubmitting(true);
-
     try {
+      setIsSubmitting(true);
+      setShowGeneratingModal(true);
+
+      const company = getCompany(user.companyId);
+      
       // Check if company can create a quote
       if (status === 'sent') {
         const eligibility = await canCreateQuote(user.companyId);
@@ -265,6 +336,7 @@ export function NewQuotePage() {
           }
           toast.error(eligibility.reason || 'Unable to create quote');
           setIsSubmitting(false);
+          setShowGeneratingModal(false);
           return;
         }
       }
@@ -281,6 +353,8 @@ export function NewQuotePage() {
           costPrice: installationCost * 0.6,
         });
       }
+
+      let quoteToUse: Quote;
 
       if (isEditMode && id) {
         // Update existing quote
@@ -305,17 +379,9 @@ export function NewQuotePage() {
         };
 
         await updateQuote(id, updateData);
-
-        // Deduct credit if quote is being sent for the first time
-        const existingQuote = getQuote(id);
-        if (status === 'sent' && existingQuote?.status === 'draft') {
-          await deductQuoteCredit(user.companyId);
-          toast.success('Quote updated and credit deducted!');
-        } else {
-          toast.success('Quote updated successfully!');
-        }
-
-        navigate(`/installer/quotes/${id}`);
+        const updatedQuote = getQuote(id);
+        if (!updatedQuote) throw new Error('Updated quote not found');
+        quoteToUse = updatedQuote;
       } else {
         // Create new quote
         const quoteData: Omit<Quote, 'id' | 'createdAt' | 'updatedAt'> = {
@@ -343,21 +409,92 @@ export function NewQuotePage() {
           sentAt: status === 'sent' ? new Date().toISOString() : undefined,
         };
 
-        const newQuote = await createQuote(quoteData);
+        quoteToUse = await createQuote(quoteData);
+      }
 
-        // Deduct credit if quote is being sent
-        if (status === 'sent') {
-          await deductQuoteCredit(user.companyId);
-          toast.success('Quote sent to customer!');
+      setQuoteForShare(quoteToUse);
+
+      try {
+        // 🎯 STEP 1: Generate share token
+        const { data: tokenData, error: tokenError } = await supabase.rpc('generate_quote_share_token');
+        if (tokenError) {
+          console.error('Error generating token:', tokenError);
         } else {
-          toast.success('Quote saved as draft!');
+          const token = tokenData as string;
+          setShareToken(token);
+          await supabase
+            .from('quotes')
+            .update({ share_token: token })
+            .eq('id', quoteToUse.id);
+          console.log('✅ Share token generated');
         }
 
-        navigate(`/installer/quotes/${newQuote.id}`);
+        // 🎯 STEP 2: Generate all proposal PDFs
+        const pdfResult = await generateAllProposalPdfs(quoteToUse, user.companyId);
+        
+        if (!pdfResult.success) {
+          console.error('PDF generation errors:', pdfResult.errors);
+          toast.warning('Some PDFs failed to generate, but continuing...');
+        }
+
+        // 🎯 STEP 3: Create document records for generated PDFs
+        for (const pdf of pdfResult.generatedPdfs) {
+          const { data: docData, error: docError } = await supabase
+            .from('documents')
+            .insert({
+              name: pdf.fileName,
+              description: `Auto-generated ${pdf.code} for quote ${quoteToUse.id.slice(0, 8)}`,
+              category: 'template',
+              file_url: pdf.fileUrl,
+              file_name: pdf.fileName,
+              version: 1,
+            })
+            .select()
+            .single();
+
+          if (!docError && docData) {
+            // Link document to quote
+            await supabase
+              .from('quote_documents')
+              .insert({
+                quote_id: quoteToUse.id,
+                document_id: docData.id,
+              });
+            console.log(`✅ Linked ${pdf.code} to quote`);
+          }
+        }
+
+        // 🎯 STEP 4: Auto-attach Document Bank documents (CC1, CC6)
+        const { error: attachError } = await supabase.rpc('attach_documents_to_quote', {
+          p_quote_id: quoteToUse.id
+        });
+
+        if (attachError) {
+          console.error('Error attaching Document Bank files:', attachError);
+        } else {
+          console.log('✅ Document Bank files attached');
+        }
+
+        if (status === 'sent') {
+          await deductQuoteCredit(user.companyId);
+        }
+        
+        setShowGeneratingModal(false);
+        setShowShareModal(true);
+        const totalDocs = pdfResult.generatedPdfs.length + (attachError ? 0 : 2);
+        toast.success(`🎉 Quote saved with ${totalDocs} documents in proposal pack!`);
+
+      } catch (error) {
+        console.error('Error generating proposal pack:', error);
+        toast.warning('Quote saved but some documents may be missing');
+        setShowGeneratingModal(false);
+        navigate(`/installer/quotes/${quoteToUse.id}`);
       }
+
     } catch (error) {
-      console.error('Error creating quote:', error);
-      toast.error('Failed to create quote. Please try again.');
+      console.error('Error creating/updating quote:', error);
+      toast.error('Failed to save quote. Please try again.');
+      setShowGeneratingModal(false);
     } finally {
       setIsSubmitting(false);
     }
@@ -939,21 +1076,15 @@ export function NewQuotePage() {
               <Card className="!p-4">
                 <div className="flex items-center justify-between">
                   <p className="text-sm text-slate-400">
-                    Ready to proceed? Save as draft or send directly to customer.
+                    Ready to proceed? Save your quote to generate the proposal pack.
                   </p>
                   <div className="flex gap-3">
                     <Button
-                      variant="secondary"
                       onClick={() => handleSubmit('draft')}
                       isLoading={isSubmitting}
+                      className="min-w-[150px]"
                     >
-                      Save Draft
-                    </Button>
-                    <Button
-                      onClick={() => handleSubmit('sent')}
-                      isLoading={isSubmitting}
-                    >
-                      Send to Customer
+                      Save Quote
                     </Button>
                   </div>
                 </div>
@@ -993,6 +1124,116 @@ export function NewQuotePage() {
           message="You've used your 5 free trial credits. Choose a payment model to continue creating quotes."
         />
       )}
+
+      {/* Generating Documents Modal */}
+      <Modal
+        isOpen={showGeneratingModal}
+        onClose={() => {}} // Prevent closing while generating
+        title="Generating Documents"
+        size="sm"
+      >
+        <div className="flex flex-col items-center justify-center py-8 space-y-4">
+          <Loader2 className="w-12 h-12 text-primary-500 animate-spin" />
+          <p className="text-slate-300 font-medium">Waiting for generating documents...</p>
+          <p className="text-sm text-slate-500 text-center">
+            We're preparing your proposal pack and generating all necessary PDFs. This may take a few moments.
+          </p>
+        </div>
+      </Modal>
+
+      {/* Share Link Modal */}
+      <Modal
+        isOpen={showShareModal}
+        onClose={() => {
+          setShowShareModal(false);
+          if (quoteForShare) {
+            navigate(`/installer/quotes/${quoteForShare.id}`);
+          }
+        }}
+        title="Share Quote with Customer"
+        size="lg"
+      >
+        <div className="space-y-6">
+          <div>
+            <p className="text-slate-300 mb-4">
+              Share this link with your customer so they can view and accept the quote online.
+            </p>
+            
+            {/* Quote Status Info */}
+            {quoteForShare?.sentAt && (
+              <div className="bg-slate-800/50 rounded-lg p-4 mb-4">
+                <div className="flex items-center gap-2 text-sm text-slate-400 mb-2">
+                  <Send className="w-4 h-4" />
+                  <span>Sent on {format(new Date(quoteForShare.sentAt), 'dd MMMM yyyy \'at\' HH:mm')}</span>
+                </div>
+              </div>
+            )}
+
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              Secure Shareable Link
+            </label>
+            {isGeneratingToken ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="text-center">
+                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-400 mb-3"></div>
+                  <p className="text-slate-400 text-sm">Generating secure link...</p>
+                </div>
+              </div>
+            ) : shareToken ? (
+              <>
+                <div className="flex gap-2 mb-3">
+                  <input
+                    type="text"
+                    value={getShareLink()}
+                    readOnly
+                    className="flex-1 px-4 py-3 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono text-sm"
+                  />
+                  <Button
+                    variant="secondary"
+                    leftIcon={<Copy className="w-4 h-4" />}
+                    onClick={handleCopyLink}
+                  >
+                    Copy
+                  </Button>
+                </div>
+                <p className="text-xs text-slate-500">
+                  🔒 This link is secure and unique to this quote. Only users with this link can view the proposal.
+                </p>
+              </>
+            ) : (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-400">
+                Failed to generate secure link. Please try again.
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3">
+            <Button
+              variant="secondary"
+              leftIcon={<Mail className="w-4 h-4" />}
+              onClick={handleSendEmail}
+              isLoading={isSendingEmail}
+              className="flex-1"
+            >
+              Share through Email
+            </Button>
+            <Button
+              onClick={handleShareWhatsApp}
+              leftIcon={<MessageCircle className="w-4 h-4" />}
+              className="flex-1  !border-[#25D366]  text-white"
+            >
+              Share on WhatsApp
+            </Button>
+          </div>
+
+          <div className="pt-4 border-t border-slate-700">
+            <p className="text-xs text-slate-500">
+              💡 Tip: You can copy this link and send it to your customer via email, WhatsApp, or SMS.
+              They'll be able to view the quote and accept it online without creating an account.
+            </p>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

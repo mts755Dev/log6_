@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -20,17 +20,26 @@ import {
   Copy,
   ExternalLink,
   Eye,
+  CreditCard,
+  Loader2,
+  MessageCircle,
+  Mail,
+  RefreshCw,
 } from 'lucide-react';
 import { Card, StatCard } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { QuoteStatusBadge } from '../../components/ui/Badge';
 import { Modal, ConfirmModal } from '../../components/ui/Modal';
+import { JobStatusPipeline } from '../../components/ui/JobStatusPipeline';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { generateQuotePDF } from '../../services/pdfGenerator';
+import { generateAllProposalPdfs } from '../../services/proposalPdfGenerator';
+import { sendQuoteToCustomer } from '../../services/emailNotifications';
 import { format } from 'date-fns';
 import { supabase } from '../../lib/supabase';
+import type { Quote } from '../../types';
 import {
   AreaChart,
   Area,
@@ -46,15 +55,103 @@ export function QuoteDetailPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const { user } = useAuth();
-  const { getQuote, updateQuote, deleteQuote, canCreateQuote, deductQuoteCredit } = useData();
+  const { getQuote, updateQuote, deleteQuote, canCreateQuote, deductQuoteCredit, refreshData } = useData();
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showGeneratingModal, setShowGeneratingModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [isSending, setIsSending] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [isGeneratingToken, setIsGeneratingToken] = useState(false);
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const quote = id ? getQuote(id) : null;
+  // Fetch fresh quote data on mount and when id changes
+  useEffect(() => {
+    if (id) {
+      fetchFreshQuote();
+    }
+  }, [id]);
+
+  const fetchFreshQuote = async () => {
+    if (!id) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('quotes')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (error) throw error;
+      
+      if (data) {
+        // Map database format to Quote type
+        const mappedQuote: Quote = {
+          id: data.id,
+          companyId: data.company_id,
+          installerId: data.installer_id,
+          installerName: data.installer_name,
+          reference: data.reference,
+          status: data.status,
+          installationType: data.installation_type,
+          customer: data.customer,
+          tariff: data.tariff,
+          lineItems: data.line_items,
+          subtotal: data.subtotal,
+          vatRate: data.vat_rate,
+          vatAmount: data.vat_amount,
+          total: data.total,
+          deposit: data.deposit,
+          margin: data.margin,
+          marginPercentage: data.margin_percentage,
+          roiProjections: data.roi_projections,
+          paybackYears: data.payback_years,
+          annualSavings: data.annual_savings,
+          notes: data.notes,
+          validUntil: data.valid_until,
+          createdAt: data.created_at,
+          updatedAt: data.updated_at,
+          sentAt: data.sent_at,
+          viewedAt: data.viewed_at,
+          acceptedAt: data.accepted_at,
+          customerSignature: data.customer_signature,
+          depositPaidAt: data.deposit_paid_at,
+          scheduledAt: data.scheduled_at,
+          installationDate: data.installation_date,
+          installationStartedAt: data.installation_started_at,
+          installationCompletedAt: data.installation_completed_at,
+          commissioningUploadedAt: data.commissioning_uploaded_at,
+          complianceReviewedAt: data.compliance_reviewed_at,
+          mcsCertifiedAt: data.mcs_certified_at,
+          finalInvoiceSentAt: data.final_invoice_sent_at,
+          closedAt: data.closed_at,
+          customerAvailability: data.customer_availability,
+        };
+        
+        // Debug log
+        console.log('📊 Quote Timeline Debug:', {
+          status: mappedQuote.status,
+          sentAt: mappedQuote.sentAt,
+          viewedAt: mappedQuote.viewedAt,
+          'sentAt is truthy': !!mappedQuote.sentAt,
+          'viewedAt is truthy': !!mappedQuote.viewedAt,
+        });
+        
+        setQuote(mappedQuote);
+      }
+    } catch (error) {
+      console.error('Error fetching quote:', error);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchFreshQuote();
+    await refreshData();
+    setIsRefreshing(false);
+    toast.success('Quote refreshed!');
+  };
 
   const handleExportPDF = async () => {
     if (!quote || !user) return;
@@ -79,36 +176,6 @@ export function QuoteDetailPage() {
       </div>
     );
   }
-
-  const handleSendQuote = async () => {
-    if (!user || !user.companyId) return;
-    setIsSending(true);
-
-    try {
-      // Check eligibility
-      const eligibility = await canCreateQuote(user.companyId);
-      if (!eligibility.canCreate) {
-        toast.error(eligibility.reason || 'Unable to send quote');
-        setIsSending(false);
-        return;
-      }
-
-      // Update quote status
-      await updateQuote(quote.id, {
-        status: 'sent',
-        sentAt: new Date().toISOString(),
-      });
-
-      // Deduct credit/increment counter
-      await deductQuoteCredit(user.companyId);
-      toast.success('Quote sent successfully! Credit deducted.');
-    } catch (error) {
-      console.error('Error sending quote:', error);
-      toast.error('Failed to send quote. Please try again.');
-    } finally {
-      setIsSending(false);
-    }
-  };
 
   const handleDelete = async () => {
     try {
@@ -185,9 +252,116 @@ export function QuoteDetailPage() {
     window.open(getShareLink(), '_blank');
   };
 
+  const handleShareWhatsApp = async () => {
+    if (!quote || !shareToken) return;
+    
+    // Update quote status to 'sent' if it's still a draft
+    if (quote.status === 'draft') {
+      try {
+        await supabase
+          .from('quotes')
+          .update({
+            status: 'sent',
+            sent_at: new Date().toISOString(),
+          })
+          .eq('id', quote.id);
+        
+        // Refresh quote data
+        await fetchFreshQuote();
+      } catch (error) {
+        console.error('Error updating quote status:', error);
+      }
+    }
+    
+    const link = getShareLink();
+    const customerPhone = quote.customer.phone.replace(/\s+/g, '');
+    const message = `Hi ${quote.customer.name}, here is your solar quote from ${user?.companyName || 'heliOS'}: ${link}`;
+    const whatsappUrl = `https://wa.me/${customerPhone}?text=${encodeURIComponent(message)}`;
+    
+    window.open(whatsappUrl, '_blank');
+    toast.success('Quote marked as sent!');
+  };
+
+  const handleSendEmail = async () => {
+    if (!quote || !shareToken || !user) return;
+    
+    setIsSendingEmail(true);
+    try {
+      // Update quote status to 'sent' if it's still a draft
+      if (quote.status === 'draft') {
+        await supabase
+          .from('quotes')
+          .update({
+            status: 'sent',
+            sent_at: new Date().toISOString(),
+          })
+          .eq('id', quote.id);
+        
+        // Refresh quote data
+        await fetchFreshQuote();
+        toast.success('Quote marked as sent!');
+      }
+      
+      const result = await sendQuoteToCustomer({
+        quote: quote,
+        recipient: {
+          email: quote.customer.email,
+          name: quote.customer.name,
+        },
+        shareLink: getShareLink(),
+        companyName: user.companyName || 'heliOS Platform',
+        companyEmail: user.email || '',
+        companyPhone: '+44 782346382',
+      });
+
+      if (result.success) {
+        toast.success('Email sent successfully to customer!');
+      } else {
+        // If email service fails, open default email client as fallback
+        const subject = encodeURIComponent(`Your Quote from ${user.companyName || 'heliOS'} - ${quote.reference}`);
+        const body = encodeURIComponent(
+          `Hi ${quote.customer.name},\n\n` +
+          `Thank you for your interest in battery storage. We've prepared a personalized proposal for you.\n\n` +
+          `Quote Reference: ${quote.reference}\n` +
+          `Total Investment: £${quote.total.toLocaleString()}\n` +
+          `Estimated Annual Savings: £${quote.annualSavings.toLocaleString()}\n\n` +
+          `View your quote here:\n${getShareLink()}\n\n` +
+          `Best regards,\n${user.companyName || 'heliOS Platform'}`
+        );
+        const mailtoLink = `mailto:${quote.customer.email}?subject=${subject}&body=${body}`;
+        window.location.href = mailtoLink;
+        
+        toast.info('Opening your email client...');
+      }
+    } catch (error) {
+      console.error('Error in handleSendEmail:', error);
+      toast.error('An unexpected error occurred');
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
   const handleOpenShareModal = async () => {
     setShowShareModal(true);
-    await generateOrFetchShareToken();
+    const token = await generateOrFetchShareToken();
+    
+    // Auto-attach documents when generating share link
+    if (token && user?.companyId) {
+      try {
+        const { error: attachError } = await supabase.rpc('attach_documents_to_quote', {
+          p_quote_id: quote.id
+        });
+
+        if (attachError) {
+          console.error('Error attaching documents:', attachError);
+          toast.error('Documents attached with warnings.');
+        } else {
+          console.log('Documents automatically attached to quote');
+        }
+      } catch (error) {
+        console.error('Failed to attach documents:', error);
+      }
+    }
   };
 
   const battery = quote.lineItems.find(li => li.type === 'battery');
@@ -235,22 +409,22 @@ export function QuoteDetailPage() {
               </Button>
             </>
           )}
-          {quote.status === 'draft' && (
+          {(quote.status === 'sent' || quote.status === 'viewed' || quote.status === 'draft') && (
             <Button 
-              onClick={handleSendQuote} 
-              leftIcon={<Send className="w-4 h-4" />}
-              isLoading={isSending}
-            >
-              Send to Customer
-            </Button>
-          )}
-          {(quote.status === 'sent' || quote.status === 'viewed' || quote.status === 'accepted') && (
-            <Button 
-              variant="secondary" 
+              variant="primary" 
               leftIcon={<Share2 className="w-4 h-4" />}
               onClick={handleOpenShareModal}
             >
               Share Link
+            </Button>
+          )}
+          {quote.status === 'deposit_paid' && (
+            <Button 
+              variant="primary" 
+              leftIcon={<Calendar className="w-4 h-4" />}
+              onClick={() => navigate(`/installer/scheduler?quoteId=${quote.id}`)}
+            >
+              Schedule Installation
             </Button>
           )}
           <Button 
@@ -260,6 +434,15 @@ export function QuoteDetailPage() {
             isLoading={isExporting}
           >
             Export PDF
+          </Button>
+          <Button 
+            variant="secondary" 
+            leftIcon={<RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />}
+            onClick={handleRefresh}
+            isLoading={isRefreshing}
+            title="Refresh quote data"
+          >
+            Refresh
           </Button>
         </div>
       </div>
@@ -291,6 +474,31 @@ export function QuoteDetailPage() {
           icon={<CheckCircle2 className="w-6 h-6" />}
         />
       </div>
+
+      {/* Job Status Pipeline - Phase 5A */}
+      {quote.status !== 'draft' && quote.status !== 'rejected' && quote.status !== 'expired' && (
+        <Card>
+          <h3 className="section-title mb-6">Job Progress</h3>
+          <JobStatusPipeline
+            currentStatus={quote.status}
+            timestamps={{
+              createdAt: quote.createdAt,
+              sentAt: quote.sentAt,
+              viewedAt: quote.viewedAt,
+              acceptedAt: quote.acceptedAt,
+              depositPaidAt: quote.depositPaidAt,
+              scheduledAt: quote.scheduledAt,
+              installationStartedAt: quote.installationStartedAt,
+              installationCompletedAt: quote.installationCompletedAt,
+              commissioningUploadedAt: quote.commissioningUploadedAt,
+              complianceReviewedAt: quote.complianceReviewedAt,
+              mcsCertifiedAt: quote.mcsCertifiedAt,
+              finalInvoiceSentAt: quote.finalInvoiceSentAt,
+              closedAt: quote.closedAt,
+            }}
+          />
+        </Card>
+      )}
 
       {/* Main Content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -430,30 +638,189 @@ export function QuoteDetailPage() {
           {/* Status Timeline */}
           <Card>
             <h3 className="section-title">Quote Timeline</h3>
-            <div className="space-y-4">
+            <div className="space-y-0">
               <TimelineItem
                 title="Created"
                 date={quote.createdAt}
                 isComplete
+                isLast={quote.status === 'draft'}
+                isNextComplete={!!quote.sentAt}
               />
-              <TimelineItem
-                title="Sent to Customer"
-                date={quote.sentAt}
-                isComplete={!!quote.sentAt}
-              />
-              <TimelineItem
-                title="Viewed by Customer"
-                date={quote.viewedAt}
-                isComplete={!!quote.viewedAt}
-              />
-              <TimelineItem
-                title="Customer Response"
-                date={quote.acceptedAt}
-                isComplete={quote.status === 'accepted' || quote.status === 'rejected'}
-                status={quote.status === 'accepted' ? 'success' : quote.status === 'rejected' ? 'error' : undefined}
-              />
+              {quote.status !== 'draft' && (
+                <>
+                  <TimelineItem
+                    title="Sent to Customer"
+                    date={quote.sentAt}
+                    isComplete={!!quote.sentAt}
+                    isLast={false}
+                    isNextComplete={!!quote.viewedAt}
+                  />
+                  <TimelineItem
+                    title="Viewed by Customer"
+                    date={quote.viewedAt}
+                    isComplete={!!quote.viewedAt}
+                    isLast={false}
+                    isNextComplete={!!quote.depositPaidAt}
+                  />
+                  <TimelineItem
+                    title="Deposit Paid"
+                    date={quote.depositPaidAt}
+                    isComplete={!!quote.depositPaidAt}
+                    status={quote.depositPaidAt ? 'success' : undefined}
+                    isLast={false}
+                    isNextComplete={!!quote.scheduledAt}
+                  />
+                  <TimelineItem
+                    title="Installation Scheduled"
+                    date={quote.scheduledAt}
+                    isComplete={!!quote.scheduledAt}
+                    isLast={false}
+                    isNextComplete={!!quote.installationStartedAt}
+                  />
+                  <TimelineItem
+                    title="Installation Started"
+                    date={quote.installationStartedAt}
+                    isComplete={!!quote.installationStartedAt}
+                    isLast={false}
+                    isNextComplete={!!quote.installationCompletedAt}
+                  />
+                  <TimelineItem
+                    title="Installation Completed"
+                    date={quote.installationCompletedAt}
+                    isComplete={!!quote.installationCompletedAt}
+                    isLast={false}
+                    isNextComplete={!!quote.commissioningUploadedAt}
+                  />
+                  <TimelineItem
+                    title="Commissioning"
+                    date={quote.commissioningUploadedAt}
+                    isComplete={!!quote.commissioningUploadedAt}
+                    isLast={false}
+                    isNextComplete={!!quote.complianceReviewedAt}
+                  />
+                  <TimelineItem
+                    title="Compliance Review"
+                    date={quote.complianceReviewedAt}
+                    isComplete={!!quote.complianceReviewedAt}
+                    isLast={false}
+                    isNextComplete={!!quote.mcsCertifiedAt}
+                  />
+                  <TimelineItem
+                    title="MCS Certified"
+                    date={quote.mcsCertifiedAt}
+                    isComplete={!!quote.mcsCertifiedAt}
+                    status={quote.mcsCertifiedAt ? 'success' : undefined}
+                    isLast={false}
+                    isNextComplete={!!quote.finalInvoiceSentAt}
+                  />
+                  <TimelineItem
+                    title="Final Invoice Sent"
+                    date={quote.finalInvoiceSentAt}
+                    isComplete={!!quote.finalInvoiceSentAt}
+                    isLast={false}
+                    isNextComplete={!!quote.closedAt}
+                  />
+                  <TimelineItem
+                    title="Job Closed"
+                    date={quote.closedAt}
+                    isComplete={!!quote.closedAt}
+                    status={quote.closedAt ? 'success' : undefined}
+                    isLast={true}
+                    isNextComplete={false}
+                  />
+                </>
+              )}
             </div>
           </Card>
+
+          {/* Payment Summary */}
+          {quote.status === 'deposit_paid' || quote.depositPaidAt ? (
+            <Card className="bg-gradient-to-br from-success-500/10 to-success-600/5 border-success-500/20">
+              <h3 className="section-title flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-success-400" />
+                Payment Summary
+              </h3>
+              <div className="space-y-3">
+                <div className="flex justify-between items-center p-3 bg-slate-800/50 rounded-lg">
+                  <span className="text-sm text-slate-400">Total Quote Value</span>
+                  <span className="text-lg font-bold text-white">£{quote.total.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-success-500/10 rounded-lg border border-success-500/20">
+                  <div>
+                    <span className="text-sm text-success-400 font-medium">Deposit Paid</span>
+                    {quote.depositPaidAt && (
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {format(new Date(quote.depositPaidAt), 'dd MMM yyyy, HH:mm')}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-lg font-bold text-success-400">£{quote.deposit.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-warning-500/10 rounded-lg border border-warning-500/20">
+                  <span className="text-sm text-warning-400 font-medium">Balance Due on Completion</span>
+                  <span className="text-lg font-bold text-warning-400">£{(quote.total - quote.deposit).toLocaleString()}</span>
+                </div>
+              </div>
+              {quote.status === 'deposit_paid' && (
+                <div className="mt-4 p-3 bg-primary-500/10 border border-primary-500/30 rounded-lg">
+                  <p className="text-xs text-primary-300">
+                    💡 <strong>Next Step:</strong> Schedule the installation with the customer
+                  </p>
+                </div>
+              )}
+            </Card>
+          ) : null}
+
+          {/* Customer Availability */}
+          {quote.customerAvailability && (
+            <Card className="bg-gradient-to-br from-primary-500/10 to-primary-600/5 border-primary-500/20">
+              <h3 className="section-title flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-primary-400" />
+                Customer Availability
+              </h3>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs text-slate-400 mb-2">Available Dates:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {quote.customerAvailability.dates.map((date, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center gap-2 bg-primary-500/20 border border-primary-500/30 rounded-lg px-3 py-2"
+                      >
+                        <Calendar className="w-4 h-4 text-primary-400" />
+                        <span className="text-sm text-white">
+                          {format(new Date(date), 'dd MMM yyyy')}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-2 p-3 bg-slate-800/50 rounded-lg">
+                  <Clock className="w-5 h-5 text-primary-400" />
+                  <div>
+                    <span className="text-xs text-slate-400">Preferred Time:</span>
+                    <p className="text-sm text-white font-medium capitalize">
+                      {quote.customerAvailability.timeSlot === 'fullday' ? 'Full Day (Flexible)' : quote.customerAvailability.timeSlot}
+                    </p>
+                  </div>
+                </div>
+
+                {quote.customerAvailability.notes && (
+                  <div className="p-3 bg-slate-800/50 rounded-lg">
+                    <p className="text-xs text-slate-400 mb-1">Additional Notes:</p>
+                    <p className="text-sm text-slate-300">{quote.customerAvailability.notes}</p>
+                  </div>
+                )}
+
+                <div className="pt-2 border-t border-slate-700">
+                  <p className="text-xs text-slate-500">
+                    Submitted: {format(new Date(quote.customerAvailability.submittedAt), 'dd MMM yyyy, HH:mm')}
+                  </p>
+                </div>
+              </div>
+            </Card>
+          )}
 
           {/* Tariff Info */}
           <Card>
@@ -536,6 +903,22 @@ export function QuoteDetailPage() {
         </div>
       </div>
 
+      {/* Generating Documents Modal */}
+      <Modal
+        isOpen={showGeneratingModal}
+        onClose={() => {}} // Prevent closing while generating
+        title="Generating Documents"
+        size="sm"
+      >
+        <div className="flex flex-col items-center justify-center py-8 space-y-4">
+          <Loader2 className="w-12 h-12 text-primary-500 animate-spin" />
+          <p className="text-slate-300 font-medium">Waiting for generating documents...</p>
+          <p className="text-sm text-slate-500 text-center">
+            We're preparing your proposal pack and generating all necessary PDFs. This may take a few moments.
+          </p>
+        </div>
+      </Modal>
+
       {/* Share Link Modal */}
       <Modal
         isOpen={showShareModal}
@@ -612,17 +995,19 @@ export function QuoteDetailPage() {
           <div className="flex gap-3">
             <Button
               variant="secondary"
-              leftIcon={<ExternalLink className="w-4 h-4" />}
-              onClick={handleOpenCustomerView}
+              leftIcon={<Mail className="w-4 h-4" />}
+              onClick={handleSendEmail}
+              isLoading={isSendingEmail}
               className="flex-1"
             >
-              Preview Customer View
+              Share through Email
             </Button>
             <Button
-              onClick={() => setShowShareModal(false)}
-              className="flex-1"
+              onClick={handleShareWhatsApp}
+              leftIcon={<MessageCircle className="w-4 h-4" />}
+              className="flex-1 !border-[#25D366] text-white"
             >
-              Done
+              Share on WhatsApp
             </Button>
           </div>
 
@@ -653,24 +1038,57 @@ function TimelineItem({
   title, 
   date, 
   isComplete, 
-  status 
+  status,
+  isLast = false,
+  isNextComplete = false
 }: { 
   title: string; 
   date?: string; 
   isComplete: boolean;
   status?: 'success' | 'error';
+  isLast?: boolean;
+  isNextComplete?: boolean;
 }) {
   const getColor = () => {
     if (!isComplete) return 'bg-slate-700';
-    if (status === 'success') return 'bg-success-500';
     if (status === 'error') return 'bg-red-500';
-    return 'bg-primary-500';
+    // ALL completed items get yellow dots (no green for success)
+    return 'bg-yellow-400';
   };
 
+  const getBorderColor = () => {
+    if (!isComplete) return 'border-slate-700';
+    if (status === 'error') return 'border-red-500';
+    // ALL completed items get yellow borders
+    return 'border-yellow-400';
+  };
+  
+  // Debug log for sent/viewed items
+  if (title === 'Sent to Customer' || title === 'Viewed by Customer') {
+    console.log(`🔍 ${title}:`, {
+      date,
+      isComplete,
+      status,
+      isNextComplete,
+      color: getColor(),
+      borderColor: getBorderColor(),
+    });
+  }
+
   return (
-    <div className="flex items-start gap-3">
-      <div className={`w-3 h-3 rounded-full mt-1.5 ${getColor()}`} />
-      <div className="flex-1">
+    <div className="flex items-start gap-3 relative">
+      {/* Connecting Line - yellow only if both current AND next are complete */}
+      {!isLast && (
+        <div className={`absolute left-[5px] top-[18px] w-0.5 h-full ${
+          isComplete && isNextComplete ? 'bg-yellow-400' : 'bg-slate-700'
+        }`} />
+      )}
+      
+      {/* Status Dot */}
+      <div className={`w-3 h-3 rounded-full mt-1.5 relative z-10 border-2 ${getColor()} ${getBorderColor()}`} />
+      
+      {/* Content */}
+      <div className="flex-1 pb-2">
         <p className={`text-sm font-medium ${isComplete ? 'text-white' : 'text-slate-500'}`}>
           {title}
         </p>
