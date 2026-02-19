@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { useAuth } from '../../contexts/AuthContext';
+import { useData } from '../../contexts/DataContext';
 import { cn } from '../../utils/cn';
 import type { UserRole } from '../../types';
 
@@ -92,11 +93,15 @@ const navigationConfig: Record<UserRole, NavItem[]> = {
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { user, logout } = useAuth();
+  const { getCompany } = useData();
   const navigate = useNavigate();
 
   if (!user) return null;
 
   const navigation = navigationConfig[user.role];
+  const company = user.companyId ? getCompany(user.companyId) : null;
+  const brandColor = (company?.brandColor && company.brandColor !== '#0c8cf1') ? company.brandColor : '#eab308';
+  const companyLogo = company?.logo || null;
 
   const handleLogout = async () => {
     await logout();
@@ -154,8 +159,16 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       >
         {/* Logo */}
         <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-          <Link to="/" onClick={handleNavClick}>
-            <Logo size="md" variant="dark" />
+          <Link to="/" onClick={handleNavClick} className="flex items-center gap-3">
+            {user.role === 'installer' && companyLogo ? (
+              <img 
+                src={companyLogo} 
+                alt={company?.name || 'Company'} 
+                className="h-8 max-w-[140px] object-contain"
+              />
+            ) : (
+              <Logo size="md" variant="dark" />
+            )}
           </Link>
           {/* Mobile close button */}
           <button
@@ -169,12 +182,20 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         {/* User Info */}
         <div className="px-4 py-4 border-b border-slate-800">
           <div className="flex items-center gap-3 px-2">
-            <div className={cn(
-              "w-10 h-10 rounded-xl flex items-center justify-center font-semibold text-sm",
-              roleColors[user.role]
-            )}>
-              {user.name.charAt(0).toUpperCase()}
-            </div>
+            {user.avatar ? (
+              <img
+                src={user.avatar}
+                alt={user.name}
+                className="w-10 h-10 rounded-xl object-cover"
+              />
+            ) : (
+              <div className={cn(
+                "w-10 h-10 rounded-xl flex items-center justify-center font-semibold text-sm",
+                roleColors[user.role]
+              )}>
+                {user.name.charAt(0).toUpperCase()}
+              </div>
+            )}
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-white truncate">{user.name}</p>
               <p className="text-xs text-slate-500">{roleLabels[user.role]}</p>
@@ -194,11 +215,22 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                   className={({ isActive }) =>
                     cn('sidebar-link group', isActive && 'sidebar-link-active')
                   }
+                  style={({ isActive }) => 
+                    isActive && brandColor
+                      ? {
+                          borderLeftColor: brandColor,
+                          backgroundColor: `${brandColor}15`,
+                        }
+                      : undefined
+                  }
                 >
                   {item.icon}
                   <span className="flex-1 font-medium">{item.label}</span>
                   {item.badge && item.badge > 0 && (
-                    <span className="px-2 py-0.5 text-xs bg-primary-600 text-white rounded-full font-semibold">
+                    <span 
+                      className="px-2 py-0.5 text-xs text-white rounded-full font-semibold"
+                      style={{ backgroundColor: brandColor || undefined }}
+                    >
                       {item.badge}
                     </span>
                   )}
@@ -212,11 +244,30 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         {/* Company Info (for installers) */}
         {user.role === 'installer' && (
           <div className="px-5 py-3 border-t border-slate-800">
-            <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-              <Building2 className="w-3.5 h-3.5" />
-              <span>Company</span>
+            <div className="flex items-center gap-3">
+              {companyLogo ? (
+                <div className="w-8 h-8 rounded-lg overflow-hidden bg-slate-800 flex-shrink-0 border border-slate-700">
+                  <img src={companyLogo} alt="" className="w-full h-full object-contain p-0.5" />
+                </div>
+              ) : (
+                <div 
+                  className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                  style={{ backgroundColor: brandColor ? `${brandColor}20` : undefined }}
+                >
+                  <Building2 className="w-4 h-4" style={{ color: brandColor || undefined }} />
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-slate-500">Company</p>
+                <p className="text-sm text-slate-300 truncate font-medium">{user.companyName || company?.name}</p>
+              </div>
+              {brandColor && (
+                <div 
+                  className="w-3 h-3 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: brandColor }}
+                />
+              )}
             </div>
-            <p className="text-sm text-slate-300 truncate font-medium">{user.companyName}</p>
           </div>
         )}
 

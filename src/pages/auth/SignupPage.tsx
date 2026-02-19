@@ -277,7 +277,7 @@ export function SignupPage() {
               proposals_used_this_month: 0,
               proposal_reset_date: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString(),
               logo: null,
-              brand_color: '#0c8cf1',
+              brand_color: '#eab308',
             })
             .select('id')
             .single();

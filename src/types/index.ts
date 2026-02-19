@@ -41,6 +41,14 @@ export interface Company {
   proposalsUsedThisMonth: number;
   proposalResetDate: string; // Date when counter resets
   
+  // Stripe Connect fields
+  stripeConnectAccountId?: string;
+  stripeConnectOnboardingComplete?: boolean;
+  stripeConnectDetailsSubmitted?: boolean;
+  stripeConnectAccountStatus?: 'pending' | 'enabled' | 'disabled' | 'rejected';
+  stripeConnectChargesEnabled?: boolean;
+  stripeConnectPayoutsEnabled?: boolean;
+  
   // Branding
   logo?: string;
   brandColor?: string;

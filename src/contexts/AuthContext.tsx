@@ -5,6 +5,7 @@ import type { User, UserRole } from '../types';
 
 interface AuthContextType {
   user: User | null;
+  setUser: React.Dispatch<React.SetStateAction<User | null>>;
   isLoading: boolean;
   login: (email: string, password: string, role: UserRole) => Promise<boolean>;
   logout: () => Promise<void>;
@@ -100,6 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         role: profile.role as UserRole,
         companyId: profile.company_id,
         phone: profile.phone,
+        avatar: profile.avatar_url || undefined,
         isActive: profile.is_active,
         createdAt: profile.created_at,
         lastLogin: new Date().toISOString(),
@@ -180,6 +182,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               role: profile.role as UserRole,
               companyId: profile.company_id,
               phone: profile.phone,
+              avatar: profile.avatar_url || undefined,
               isActive: profile.is_active,
               createdAt: profile.created_at,
               lastLogin: new Date().toISOString(),
@@ -301,6 +304,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           role: profile.role as UserRole,
           companyId: profile.company_id,
           phone: profile.phone,
+          avatar: profile.avatar_url || undefined,
           isActive: profile.is_active,
           createdAt: profile.created_at,
           lastLogin: new Date().toISOString(),
@@ -331,6 +335,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
+        setUser,
         isLoading,
         login,
         logout,

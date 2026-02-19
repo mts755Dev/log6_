@@ -5,21 +5,54 @@ import { Menu } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { Logo } from '../ui/Logo';
 import { useAuth } from '../../contexts/AuthContext';
+import { useData } from '../../contexts/DataContext';
 import type { UserRole } from '../../types';
 
 interface DashboardLayoutProps {
   requiredRole: UserRole;
 }
 
+// Helper to convert hex to RGB values
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result
+    ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16),
+      }
+    : null;
+}
+
 export function DashboardLayout({ requiredRole }: DashboardLayoutProps) {
   const { user, isLoading, isAuthenticated } = useAuth();
+  const { getCompany } = useData();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const company = user?.companyId ? getCompany(user.companyId) : null;
 
   // Add dark class to body for dashboard styling
   useEffect(() => {
     document.body.classList.add('dark');
     return () => document.body.classList.remove('dark');
   }, []);
+
+  // Apply brand color as CSS custom properties for installer role
+  const resolvedBrandColor = (company?.brandColor && company.brandColor !== '#0c8cf1') ? company.brandColor : '#eab308';
+  
+  useEffect(() => {
+    if (user?.role === 'installer') {
+      const rgb = hexToRgb(resolvedBrandColor);
+      if (rgb) {
+        document.documentElement.style.setProperty('--brand-color', resolvedBrandColor);
+        document.documentElement.style.setProperty('--brand-color-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
+      }
+    }
+    return () => {
+      document.documentElement.style.removeProperty('--brand-color');
+      document.documentElement.style.removeProperty('--brand-color-rgb');
+    };
+  }, [user?.role, resolvedBrandColor]);
 
   // Close sidebar on window resize to desktop
   useEffect(() => {

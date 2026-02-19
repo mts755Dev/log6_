@@ -310,6 +310,117 @@
   }
 }
 
+  /* ===== Brand Color Overrides ===== */
+  /* When --brand-color is set on :root by installer DashboardLayout,
+     ALL primary-colored elements automatically adopt the brand color */
+
+  /* --- Text Colors --- */
+  :root[style*="--brand-color"] .text-primary-300 { color: var(--brand-color) !important; opacity: 0.85; }
+  :root[style*="--brand-color"] .text-primary-400 { color: var(--brand-color) !important; }
+  :root[style*="--brand-color"] .text-primary-500 { color: var(--brand-color) !important; }
+  :root[style*="--brand-color"] .text-primary-600 { color: var(--brand-color) !important; }
+  :root[style*="--brand-color"] .hover\:text-primary-300:hover { color: var(--brand-color) !important; opacity: 0.85; }
+  :root[style*="--brand-color"] .hover\:text-primary-400:hover { color: var(--brand-color) !important; }
+
+  /* --- Solid Backgrounds --- */
+  :root[style*="--brand-color"] .bg-primary-500 { background-color: var(--brand-color) !important; }
+  :root[style*="--brand-color"] .bg-primary-600 { background-color: var(--brand-color) !important; }
+  :root[style*="--brand-color"] .hover\:bg-primary-700:hover { background-color: color-mix(in srgb, var(--brand-color) 80%, black) !important; }
+  :root[style*="--brand-color"] .peer:checked ~ .peer-checked\:bg-primary-600 { background-color: var(--brand-color) !important; }
+
+  /* --- Background with Opacity --- */
+  :root[style*="--brand-color"] .bg-primary-500\/5 { background-color: rgba(var(--brand-color-rgb), 0.05) !important; }
+  :root[style*="--brand-color"] .bg-primary-500\/10 { background-color: rgba(var(--brand-color-rgb), 0.1) !important; }
+  :root[style*="--brand-color"] .bg-primary-500\/15 { background-color: rgba(var(--brand-color-rgb), 0.15) !important; }
+  :root[style*="--brand-color"] .bg-primary-500\/20 { background-color: rgba(var(--brand-color-rgb), 0.2) !important; }
+  :root[style*="--brand-color"] .bg-primary-500\/30 { background-color: rgba(var(--brand-color-rgb), 0.3) !important; }
+  :root[style*="--brand-color"] .bg-primary-600\/5 { background-color: rgba(var(--brand-color-rgb), 0.05) !important; }
+  :root[style*="--brand-color"] .bg-primary-600\/20 { background-color: rgba(var(--brand-color-rgb), 0.2) !important; }
+
+  /* --- Border Colors --- */
+  :root[style*="--brand-color"] .border-primary-500 { border-color: var(--brand-color) !important; }
+  :root[style*="--brand-color"] .border-primary-500\/20 { border-color: rgba(var(--brand-color-rgb), 0.2) !important; }
+  :root[style*="--brand-color"] .border-primary-500\/25 { border-color: rgba(var(--brand-color-rgb), 0.25) !important; }
+  :root[style*="--brand-color"] .border-primary-500\/30 { border-color: rgba(var(--brand-color-rgb), 0.3) !important; }
+  :root[style*="--brand-color"] .border-primary-600 { border-color: var(--brand-color) !important; }
+
+  /* --- Gradients --- */
+  :root[style*="--brand-color"] .from-primary-500\/10 { --tw-gradient-from: rgba(var(--brand-color-rgb), 0.1) !important; }
+  :root[style*="--brand-color"] .from-primary-500\/20 { --tw-gradient-from: rgba(var(--brand-color-rgb), 0.2) !important; }
+  :root[style*="--brand-color"] .from-primary-600 { --tw-gradient-from: var(--brand-color) !important; }
+  :root[style*="--brand-color"] .to-primary-400 { --tw-gradient-to: var(--brand-color) !important; }
+  :root[style*="--brand-color"] .to-primary-600\/5 { --tw-gradient-to: rgba(var(--brand-color-rgb), 0.05) !important; }
+
+  /* --- Focus & Ring --- */
+  :root[style*="--brand-color"] .focus\:border-primary-500:focus { border-color: var(--brand-color) !important; }
+  :root[style*="--brand-color"] .focus\:outline-none.focus\:border-primary-500:focus { border-color: var(--brand-color) !important; }
+  :root[style*="--brand-color"] .focus\:ring-primary-500:focus { --tw-ring-color: var(--brand-color) !important; }
+  :root[style*="--brand-color"] .focus\:ring-primary-500\/50:focus { --tw-ring-color: rgba(var(--brand-color-rgb), 0.5) !important; }
+  :root[style*="--brand-color"] .input:focus {
+    border-color: var(--brand-color);
+    box-shadow: 0 0 0 2px rgba(var(--brand-color-rgb), 0.5);
+  }
+
+  /* --- Buttons (component class + Tailwind utilities) --- */
+  :root[style*="--brand-color"] .btn-primary,
+  :root[style*="--brand-color"] .brand-btn-primary {
+    background-color: var(--brand-color) !important;
+    box-shadow: 0 10px 15px -3px rgba(var(--brand-color-rgb), 0.2);
+  }
+  :root[style*="--brand-color"] .btn-primary:hover,
+  :root[style*="--brand-color"] .brand-btn-primary:hover {
+    background-color: color-mix(in srgb, var(--brand-color) 80%, black) !important;
+    box-shadow: 0 10px 15px -3px rgba(var(--brand-color-rgb), 0.3);
+  }
+  :root[style*="--brand-color"] .shadow-primary-600\/20 {
+    --tw-shadow-color: rgba(var(--brand-color-rgb), 0.2);
+  }
+  :root[style*="--brand-color"] .hover\:shadow-primary-600\/30:hover {
+    --tw-shadow-color: rgba(var(--brand-color-rgb), 0.3);
+  }
+
+  /* --- Sidebar --- */
+  :root[style*="--brand-color"] .sidebar-link-active {
+    border-color: var(--brand-color);
+    background-color: rgba(var(--brand-color-rgb), 0.1);
+  }
+
+  /* --- Badge --- */
+  :root[style*="--brand-color"] .badge-primary {
+    color: var(--brand-color);
+    background-color: rgba(var(--brand-color-rgb), 0.15);
+    border-color: rgba(var(--brand-color-rgb), 0.25);
+  }
+
+  /* --- Spinner --- */
+  :root[style*="--brand-color"] .spinner {
+    border-top-color: var(--brand-color);
+  }
+  :root[style*="--brand-color"] .border-b-2.border-primary-500 {
+    border-bottom-color: var(--brand-color) !important;
+  }
+
+  /* --- Selection --- */
+  :root[style*="--brand-color"] ::selection {
+    background-color: rgba(var(--brand-color-rgb), 0.3);
+  }
+
+  /* --- Grid Background --- */
+  :root[style*="--brand-color"] .bg-grid {
+    background-image: 
+      linear-gradient(rgba(var(--brand-color-rgb), 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(var(--brand-color-rgb), 0.03) 1px, transparent 1px);
+  }
+
+  /* --- Checkbox & Toggle accent --- */
+  :root[style*="--brand-color"] input[type="checkbox"].text-primary-600,
+  :root[style*="--brand-color"] input[type="checkbox"].text-primary-500 {
+    accent-color: var(--brand-color);
+  }
+  :root[style*="--brand-color"] .peer:checked ~ .peer-checked\:bg-primary-600 {
+    background-color: var(--brand-color) !important;
+  }
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

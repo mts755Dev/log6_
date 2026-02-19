@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { 
   User, 
@@ -12,6 +12,9 @@ import {
   Download,
   Upload,
   Calendar,
+  Camera,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -21,19 +24,26 @@ import { Badge } from '../../components/ui/Badge';
 import { FileUpload } from '../../components/ui/FileUpload';
 import { FileUploadWithDates } from '../../components/ui/FileUploadWithDates';
 import { ChoosePaymentModel } from '../../components/payments/ChoosePaymentModel';
+import { StripeConnectOnboarding } from '../../components/payments/StripeConnectOnboarding';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import { useToast } from '../../contexts/ToastContext';
 import { supabase } from '../../lib/supabase';
+import type { User as UserType } from '../../types';
 import { uploadDocument, saveDocumentMetadata, getNextDocumentVersion } from '../../lib/storage';
 
 export function SettingsPage() {
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
   const { getCompany, refreshData } = useData();
   const toast = useToast();
   const [activeTab, setActiveTab] = useState('profile');
   const [isLoading, setIsLoading] = useState(false);
   const [showChoosePaymentModal, setShowChoosePaymentModal] = useState(false);
+
+  // Photo upload state
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
   
   // Documents state
   const [documents, setDocuments] = useState<any[]>([]);
@@ -41,6 +51,11 @@ export function SettingsPage() {
   const [editingDocumentId, setEditingDocumentId] = useState<string | null>(null);
   const [newDocumentFile, setNewDocumentFile] = useState<File | null>(null);
   const [documentDates, setDocumentDates] = useState({ issuedDate: '', expiryDate: '' });
+
+  // Logo upload state
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
 
   const company = user?.companyId ? getCompany(user.companyId) : null;
 
@@ -62,7 +77,7 @@ export function SettingsPage() {
     mcsNumber: company?.mcsNumber || '',
     address: company?.address || '',
     postcode: company?.postcode || '',
-    brandColor: company?.brandColor || '#0c8cf1',
+    brandColor: (company?.brandColor && company.brandColor !== '#0c8cf1') ? company.brandColor : '#eab308',
   });
 
   // Notification preferences state
@@ -85,8 +100,12 @@ export function SettingsPage() {
         mcsNumber: company.mcsNumber || '',
         address: company.address,
         postcode: company.postcode,
-        brandColor: company.brandColor || '#0c8cf1',
+        brandColor: (company.brandColor && company.brandColor !== '#0c8cf1') ? company.brandColor : '#eab308',
       });
+      // Load existing logo
+      if (company.logo) {
+        setLogoPreview(company.logo);
+      }
     }
   }, [company]);
 
@@ -99,6 +118,10 @@ export function SettingsPage() {
         email: user.email,
         phone: user.phone || '',
       }));
+      // Load existing avatar
+      if (user.avatar) {
+        setPhotoPreview(user.avatar);
+      }
     }
   }, [user]);
 
@@ -188,6 +211,198 @@ export function SettingsPage() {
       toast.error(error.message || 'Failed to update profile');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Handle profile photo upload
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    // Validate file type
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Please upload a PNG, JPG, or WebP image.');
+      return;
+    }
+
+    // Validate file size (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Photo must be less than 2MB.');
+      return;
+    }
+
+    setIsUploadingPhoto(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `avatars/${user.id}/avatar_${Date.now()}.${fileExt}`;
+
+      // Upload to Supabase storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('documents')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.error('Photo upload error:', uploadError);
+        throw new Error(`Failed to upload photo: ${uploadError.message}`);
+      }
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('documents')
+        .getPublicUrl(uploadData.path);
+
+      // Update profile record with avatar URL
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('id', user.id);
+
+      if (updateError) {
+        console.error('Error updating profile avatar:', updateError);
+        throw new Error('Failed to save photo URL');
+      }
+
+      setPhotoPreview(publicUrl);
+      // Update user in auth context so avatar shows immediately everywhere
+      setUser((prev: UserType | null) => prev ? { ...prev, avatar: publicUrl } : prev);
+      toast.success('Profile photo uploaded successfully!');
+    } catch (error: any) {
+      console.error('Photo upload error:', error);
+      toast.error(error.message || 'Failed to upload photo');
+    } finally {
+      setIsUploadingPhoto(false);
+      if (photoInputRef.current) {
+        photoInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Remove profile photo
+  const handleRemovePhoto = async () => {
+    if (!user) return;
+
+    setIsUploadingPhoto(true);
+    try {
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: null })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      setPhotoPreview(null);
+      setUser((prev: UserType | null) => prev ? { ...prev, avatar: undefined } : prev);
+      toast.success('Photo removed successfully!');
+    } catch (error: any) {
+      console.error('Error removing photo:', error);
+      toast.error('Failed to remove photo');
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
+
+  // Handle logo file selection and upload
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Please upload a PNG, JPG, WebP, or SVG image.');
+      return;
+    }
+
+    // Validate file size (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Logo image must be less than 2MB.');
+      return;
+    }
+
+    if (!user?.companyId && !company) {
+      toast.error('Please save company details first before uploading a logo.');
+      return;
+    }
+
+    setIsUploadingLogo(true);
+    try {
+      const companyId = user?.companyId || company?.id;
+      const fileExt = file.name.split('.').pop();
+      const fileName = `logos/${companyId}/logo_${Date.now()}.${fileExt}`;
+
+      // Upload to Supabase storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('documents')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.error('Logo upload error:', uploadError);
+        throw new Error(`Failed to upload logo: ${uploadError.message}`);
+      }
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('documents')
+        .getPublicUrl(uploadData.path);
+
+      // Update company record with logo URL
+      if (companyId) {
+        const { error: updateError } = await supabase
+          .from('companies')
+          .update({ logo: publicUrl })
+          .eq('id', companyId);
+
+        if (updateError) {
+          console.error('Error updating company logo:', updateError);
+          throw new Error('Failed to save logo URL');
+        }
+      }
+
+      setLogoPreview(publicUrl);
+      await refreshData();
+      toast.success('Company logo uploaded successfully!');
+    } catch (error: any) {
+      console.error('Logo upload error:', error);
+      toast.error(error.message || 'Failed to upload logo');
+    } finally {
+      setIsUploadingLogo(false);
+      // Reset file input
+      if (logoInputRef.current) {
+        logoInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Remove logo
+  const handleRemoveLogo = async () => {
+    if (!user?.companyId && !company) return;
+
+    setIsUploadingLogo(true);
+    try {
+      const companyId = user?.companyId || company?.id;
+
+      const { error: updateError } = await supabase
+        .from('companies')
+        .update({ logo: null })
+        .eq('id', companyId);
+
+      if (updateError) throw updateError;
+
+      setLogoPreview(null);
+      await refreshData();
+      toast.success('Logo removed successfully!');
+    } catch (error: any) {
+      console.error('Error removing logo:', error);
+      toast.error('Failed to remove logo');
+    } finally {
+      setIsUploadingLogo(false);
     }
   };
 
@@ -528,7 +743,8 @@ export function SettingsPage() {
     { id: 'profile', label: 'Profile', icon: <User className="w-4 h-4" /> },
     { id: 'company', label: 'Company', icon: <Building2 className="w-4 h-4" /> },
     { id: 'notifications', label: 'Notifications', icon: <Bell className="w-4 h-4" /> },
-    { id: 'subscription', label: 'Subscription', icon: <CreditCard className="w-4 h-4" /> },
+    { id: 'payments', label: 'Payments', icon: <CreditCard className="w-4 h-4" /> },
+    { id: 'subscription', label: 'Subscription', icon: <Shield className="w-4 h-4" /> },
   ];
 
   return (
@@ -550,14 +766,76 @@ export function SettingsPage() {
             <h3 className="section-title">Personal Information</h3>
             <div className="max-w-xl space-y-6">
               <div className="flex items-center gap-4 mb-6">
-                <div className="w-20 h-20 bg-primary-500/20 rounded-full flex items-center justify-center text-primary-400 text-2xl font-bold">
-                  {user?.name.charAt(0)}
+                {/* Hidden file input */}
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/webp"
+                  className="hidden"
+                  onChange={handlePhotoUpload}
+                />
+                
+                <div className="relative group">
+                  {photoPreview ? (
+                    <img
+                      src={photoPreview}
+                      alt="Profile"
+                      className="w-20 h-20 rounded-full object-cover border-2 border-slate-700"
+                    />
+                  ) : (
+                    <div className="w-20 h-20 bg-primary-500/20 rounded-full flex items-center justify-center text-primary-400 text-2xl font-bold">
+                      {user?.name.charAt(0)}
+                    </div>
+                  )}
+                  {/* Camera overlay */}
+                  <button
+                    type="button"
+                    onClick={() => photoInputRef.current?.click()}
+                    className="absolute inset-0 w-20 h-20 rounded-full bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    disabled={isUploadingPhoto}
+                  >
+                    {isUploadingPhoto ? (
+                      <Loader2 className="w-5 h-5 text-white animate-spin" />
+                    ) : (
+                      <Camera className="w-5 h-5 text-white" />
+                    )}
+                  </button>
                 </div>
-                <div>
-                  <Button variant="secondary" size="sm">
-                    Change Photo
-                  </Button>
-                  <p className="text-xs text-slate-500 mt-1">JPG, PNG. Max 2MB</p>
+                
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => photoInputRef.current?.click()}
+                      disabled={isUploadingPhoto}
+                    >
+                      {isUploadingPhoto ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
+                          Uploading...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-3.5 h-3.5 mr-1.5" />
+                          {photoPreview ? 'Change Photo' : 'Upload Photo'}
+                        </>
+                      )}
+                    </Button>
+                    {photoPreview && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleRemovePhoto}
+                        disabled={isUploadingPhoto}
+                        className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500">JPG, PNG, WebP. Max 2MB</p>
                 </div>
               </div>
 
@@ -679,28 +957,88 @@ export function SettingsPage() {
 
               <div className="pt-6 border-t border-slate-700">
                 <h4 className="text-sm font-medium text-white mb-4">Branding</h4>
-                <div className="flex items-center gap-6">
+                <div className="flex items-start gap-8">
+                  {/* Company Logo Upload */}
                   <div>
                     <p className="text-sm text-slate-400 mb-2">Company Logo</p>
-                    <div className="w-32 h-32 bg-slate-800 rounded-xl flex items-center justify-center border-2 border-dashed border-slate-700">
-                      <span className="text-slate-500 text-sm">Upload Logo</span>
+                    <div className="relative group">
+                      {logoPreview ? (
+                        <div className="w-32 h-32 bg-slate-800 rounded-xl overflow-hidden border-2 border-slate-700 relative">
+                          <img
+                            src={logoPreview}
+                            alt="Company Logo"
+                            className="w-full h-full object-contain p-2"
+                          />
+                          {/* Hover overlay */}
+                          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => logoInputRef.current?.click()}
+                              className="p-2 bg-white/20 rounded-lg hover:bg-white/30 transition-colors"
+                              title="Change logo"
+                              disabled={isUploadingLogo}
+                            >
+                              <Camera className="w-4 h-4 text-white" />
+                            </button>
+                            <button
+                              onClick={handleRemoveLogo}
+                              className="p-2 bg-red-500/30 rounded-lg hover:bg-red-500/50 transition-colors"
+                              title="Remove logo"
+                              disabled={isUploadingLogo}
+                            >
+                              <Trash2 className="w-4 h-4 text-white" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => logoInputRef.current?.click()}
+                          disabled={isUploadingLogo}
+                          className="w-32 h-32 bg-slate-800 rounded-xl flex flex-col items-center justify-center border-2 border-dashed border-slate-600 hover:border-primary-500 hover:bg-slate-800/80 transition-all cursor-pointer"
+                        >
+                          {isUploadingLogo ? (
+                            <Loader2 className="w-6 h-6 text-primary-400 animate-spin" />
+                          ) : (
+                            <>
+                              <Upload className="w-6 h-6 text-slate-500 mb-1" />
+                              <span className="text-slate-500 text-xs">Upload Logo</span>
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
-                    <p className="text-xs text-slate-500 mt-2">Coming soon</p>
+                    <input
+                      ref={logoInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
+                      onChange={handleLogoUpload}
+                      className="hidden"
+                    />
+                    <p className="text-xs text-slate-500 mt-2">PNG, JPG, WebP or SVG. Max 2MB.</p>
                   </div>
+
+                  {/* Brand Color */}
                   <div>
                     <p className="text-sm text-slate-400 mb-2">Brand Color</p>
                     <div className="flex items-center gap-3">
-                      <div 
-                        className="w-10 h-10 rounded-lg border-2 border-white/20" 
+                      <label 
+                        className="w-10 h-10 rounded-lg border-2 border-white/20 cursor-pointer relative overflow-hidden" 
                         style={{ backgroundColor: companyForm.brandColor }}
-                      />
+                      >
+                        <input
+                          type="color"
+                          value={companyForm.brandColor}
+                          onChange={(e) => setCompanyForm({ ...companyForm, brandColor: e.target.value })}
+                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                        />
+                      </label>
                       <Input
-                        type="color"
                         value={companyForm.brandColor}
                         onChange={(e) => setCompanyForm({ ...companyForm, brandColor: e.target.value })}
-                        className="w-32"
+                        className="w-28"
+                        placeholder="#eab308"
                       />
                     </div>
+                    <p className="text-xs text-slate-500 mt-2">Used throughout your installer dashboard.</p>
                   </div>
                 </div>
               </div>
@@ -935,6 +1273,38 @@ export function SettingsPage() {
               </div>
             </div>
           </Card>
+        </TabPanel>
+
+        {/* Payments Tab - Stripe Connect */}
+        <TabPanel id="payments">
+          {company ? (
+            <StripeConnectOnboarding
+              companyId={company.id}
+              companyData={{
+                name: company.name,
+                email: company.email,
+                phone: company.phone,
+                address: company.address,
+                postcode: company.postcode,
+              }}
+            />
+          ) : (
+            <Card>
+              <div className="text-center py-12">
+                <Building2 className="w-16 h-16 text-slate-600 mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-white mb-2">No Company Profile</h3>
+                <p className="text-slate-400 mb-6">
+                  You need to create a company profile before setting up payments.
+                </p>
+                <Button
+                  variant="primary"
+                  onClick={() => setActiveTab('company')}
+                >
+                  Go to Company Settings
+                </Button>
+              </div>
+            </Card>
+          )}
         </TabPanel>
 
         {/* Subscription Tab */}

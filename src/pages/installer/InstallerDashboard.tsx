@@ -38,6 +38,7 @@ export function InstallerDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   
   const company = user?.companyId ? getCompany(user.companyId) : null;
+  const brandColor = (company?.brandColor && company.brandColor !== '#0c8cf1') ? company.brandColor : '#eab308';
 
   // Fetch fresh data when component mounts
   useEffect(() => {
@@ -85,12 +86,23 @@ export function InstallerDashboard() {
     <div className="space-y-8">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="page-header mb-0">
-          <h1 className="page-title">Welcome back, {user?.name.split(' ')[0]}</h1>
-          <p className="page-subtitle">{user?.companyName}</p>
+        <div className="page-header mb-0 flex items-center gap-4">
+          {company?.logo && (
+            <div className="w-12 h-12 rounded-xl overflow-hidden bg-slate-800 border border-slate-700 flex-shrink-0">
+              <img src={company.logo} alt={company.name} className="w-full h-full object-contain p-1" />
+            </div>
+          )}
+          <div>
+            <h1 className="page-title">Welcome back, {user?.name.split(' ')[0]}</h1>
+            <p className="page-subtitle">{user?.companyName || company?.name}</p>
+          </div>
         </div>
         <Link to="/installer/quotes/new" className="w-full sm:w-auto">
-          <Button leftIcon={<Plus className="w-4 h-4" />} className="w-full sm:w-auto justify-center">
+          <Button 
+            leftIcon={<Plus className="w-4 h-4" />} 
+            className="w-full sm:w-auto justify-center"
+            style={{ backgroundColor: brandColor, borderColor: brandColor }}
+          >
             New Quote
           </Button>
         </Link>
@@ -103,28 +115,28 @@ export function InstallerDashboard() {
           value={totalQuotes}
           change={`${draftQuotes.length} drafts`}
           changeType="neutral"
-          icon={<FileText className="w-6 h-6" />}
+          icon={<FileText className="w-6 h-6" style={{ color: brandColor }} />}
         />
         <StatCard
           title="Deposits Paid"
           value={depositPaidQuotes.length}
           change={`${conversionRate}% conversion`}
           changeType="positive"
-          icon={<CheckCircle2 className="w-6 h-6" />}
+          icon={<CheckCircle2 className="w-6 h-6" style={{ color: brandColor }} />}
         />
         <StatCard
           title="Pending Response"
           value={pendingQuotes.length}
           change="Awaiting customer"
           changeType="neutral"
-          icon={<Clock className="w-6 h-6" />}
+          icon={<Clock className="w-6 h-6" style={{ color: brandColor }} />}
         />
         <StatCard
           title="Revenue (Accepted)"
           value={`£${(totalValue / 1000).toFixed(1)}k`}
           change={`£${(totalMargin / 1000).toFixed(1)}k margin`}
           changeType="positive"
-          icon={<TrendingUp className="w-6 h-6" />}
+          icon={<TrendingUp className="w-6 h-6" style={{ color: brandColor }} />}
         />
       </div>
 
@@ -189,7 +201,7 @@ export function InstallerDashboard() {
                     name === 'value' ? 'Value' : 'Quotes'
                   ]}
                 />
-                <Bar dataKey="quotes" fill="#0c8cf1" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="quotes" fill={brandColor} radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -203,42 +215,51 @@ export function InstallerDashboard() {
               to="/installer/quotes/new"
               className="flex items-center gap-4 p-4 bg-slate-800/50 hover:bg-slate-800 rounded-xl transition-colors group"
             >
-              <div className="p-3 bg-primary-500/20 rounded-xl text-primary-400">
+              <div 
+                className="p-3 rounded-xl" 
+                style={{ backgroundColor: `${brandColor}20`, color: brandColor }}
+              >
                 <Calculator className="w-5 h-5" />
               </div>
               <div className="flex-1">
                 <p className="font-medium text-white">Create New Quote</p>
                 <p className="text-sm text-slate-500">Generate instant pricing</p>
               </div>
-              <ArrowRight className="w-5 h-5 text-slate-600 group-hover:text-primary-400 transition-colors" />
+              <ArrowRight className="w-5 h-5 text-slate-600 group-hover:text-white transition-colors" />
             </Link>
 
             <Link
               to="/installer/quotes"
               className="flex items-center gap-4 p-4 bg-slate-800/50 hover:bg-slate-800 rounded-xl transition-colors group"
             >
-              <div className="p-3 bg-success-500/20 rounded-xl text-success-400">
+              <div 
+                className="p-3 rounded-xl" 
+                style={{ backgroundColor: `${brandColor}15`, color: brandColor }}
+              >
                 <Send className="w-5 h-5" />
               </div>
               <div className="flex-1">
                 <p className="font-medium text-white">View Quotes</p>
                 <p className="text-sm text-slate-500">Manage existing quotes</p>
               </div>
-              <ArrowRight className="w-5 h-5 text-slate-600 group-hover:text-success-400 transition-colors" />
+              <ArrowRight className="w-5 h-5 text-slate-600 group-hover:text-white transition-colors" />
             </Link>
 
             <Link
               to="/installer/products"
               className="flex items-center gap-4 p-4 bg-slate-800/50 hover:bg-slate-800 rounded-xl transition-colors group"
             >
-              <div className="p-3 bg-warning-500/20 rounded-xl text-warning-400">
+              <div 
+                className="p-3 rounded-xl" 
+                style={{ backgroundColor: `${brandColor}10`, color: brandColor }}
+              >
                 <Eye className="w-5 h-5" />
               </div>
               <div className="flex-1">
                 <p className="font-medium text-white">Product Catalogue</p>
                 <p className="text-sm text-slate-500">Browse batteries & inverters</p>
               </div>
-              <ArrowRight className="w-5 h-5 text-slate-600 group-hover:text-warning-400 transition-colors" />
+              <ArrowRight className="w-5 h-5 text-slate-600 group-hover:text-white transition-colors" />
             </Link>
           </div>
         </Card>
@@ -274,7 +295,7 @@ export function InstallerDashboard() {
                     const battery = quote.lineItems.find(li => li.type === 'battery');
                     return (
                       <tr key={quote.id}>
-                        <td className="font-mono text-primary-400">{quote.reference}</td>
+                        <td className="font-mono" style={{ color: brandColor }}>{quote.reference}</td>
                         <td>
                           <div>
                             <p className="font-medium text-white">{quote.customer.name}</p>
@@ -322,7 +343,7 @@ export function InstallerDashboard() {
                       <QuoteStatusBadge status={quote.status} />
                     </div>
                     <div className="flex items-center justify-between text-sm">
-                      <span className="font-mono text-primary-400">{quote.reference}</span>
+                      <span className="font-mono" style={{ color: brandColor }}>{quote.reference}</span>
                       <span className="font-medium text-white">£{quote.total.toLocaleString()}</span>
                     </div>
                     <div className="flex items-center justify-between mt-2 text-xs text-slate-500">
