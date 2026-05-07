@@ -53,7 +53,7 @@ interface InstallerDocument {
   id: string;
   document_type: string;
   file_name: string;
-  file_path: string;
+  file_url: string;
   file_size: number;
   version: number;
   issued_date: string | null;
@@ -174,11 +174,12 @@ export function UsersPage() {
   const fetchInstallerDetails = async (userId: string) => {
     setLoadingDetails(true);
     try {
-      // Fetch documents
+      // Fetch documents from the consolidated onboarding docs table
       const { data: documents, error: docsError } = await supabase
-        .from('installer_documents')
+        .from('installer_onboarding_docs')
         .select('*')
-        .eq('user_id', userId)
+        .eq('uploaded_by', userId)
+        .eq('is_current', true)
         .order('document_type', { ascending: true })
         .order('version', { ascending: false });
 
@@ -1165,10 +1166,7 @@ export function UsersPage() {
                       <div
                         key={doc.id}
                         onClick={() => {
-                          const { data } = supabase.storage
-                            .from('installer-documents')
-                            .getPublicUrl(doc.file_path);
-                          window.open(data.publicUrl, '_blank');
+                          window.open(doc.file_url, '_blank');
                         }}
                         className="bg-slate-900/50 border border-slate-700 rounded-lg p-4 hover:border-primary-500/50 hover:bg-slate-800/50 transition-all cursor-pointer group"
                       >

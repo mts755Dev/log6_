@@ -71,43 +71,55 @@ export type Database = {
           updated_at?: string;
         };
       };
-      installer_documents: {
+      installer_onboarding_docs: {
         Row: {
           id: string;
-          user_id: string;
-          document_type: 'competency_cards' | 'certificates' | 'insurance' | 'mcs_certificate' | 'consumer_code' | 'insurance_backed_guarantee' | 'waste_license';
+          company_id: string;
+          uploaded_by: string;
+          document_type: string;
           file_name: string;
-          file_path: string;
+          file_url: string;
           file_size: number;
+          mime_type: string;
           version: number;
           issued_date: string | null;
           expiry_date: string | null;
+          status: string;
+          is_current: boolean;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id?: string;
-          user_id: string;
-          document_type: 'competency_cards' | 'certificates' | 'insurance' | 'mcs_certificate' | 'consumer_code' | 'insurance_backed_guarantee' | 'waste_license';
+          company_id: string;
+          uploaded_by: string;
+          document_type: string;
           file_name: string;
-          file_path: string;
+          file_url: string;
           file_size: number;
+          mime_type?: string;
           version?: number;
           issued_date?: string | null;
           expiry_date?: string | null;
+          status?: string;
+          is_current?: boolean;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
           id?: string;
-          user_id?: string;
-          document_type?: 'competency_cards' | 'certificates' | 'insurance' | 'mcs_certificate' | 'consumer_code' | 'insurance_backed_guarantee' | 'waste_license';
+          company_id?: string;
+          uploaded_by?: string;
+          document_type?: string;
           file_name?: string;
-          file_path?: string;
+          file_url?: string;
           file_size?: number;
+          mime_type?: string;
           version?: number;
           issued_date?: string | null;
           expiry_date?: string | null;
+          status?: string;
+          is_current?: boolean;
           created_at?: string;
           updated_at?: string;
         };
