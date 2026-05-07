@@ -95,58 +95,139 @@ export function generateMergeData(quote: Quote, company: Company): Record<string
 }
 
 /**
+ * Scan a horizontal row of pixels and return true if it contains no significant
+ * content (text, icons, borders). Light backgrounds are treated as blank.
+ * Samples the central 60% of the row to ignore sidebar borders or decorations.
+ */
+function isRowBlank(ctx: CanvasRenderingContext2D, y: number, canvasWidth: number): boolean {
+  const startX = Math.floor(canvasWidth * 0.15);
+  const sampleWidth = Math.floor(canvasWidth * 0.7);
+  const imageData = ctx.getImageData(startX, y, sampleWidth, 1);
+  const data = imageData.data;
+
+  let darkPixels = 0;
+  const totalPixels = sampleWidth;
+
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] < 210 || data[i + 1] < 210 || data[i + 2] < 210) {
+      darkPixels++;
+    }
+  }
+
+  return darkPixels / totalPixels < 0.02;
+}
+
+/**
+ * Find a safe vertical cut point near the ideal page boundary.
+ * Scans upward from the ideal cut to find a horizontal gap between content
+ * (consecutive rows without text/borders).
+ */
+function findSafeCutY(
+  ctx: CanvasRenderingContext2D,
+  idealCutY: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  minY: number
+): number {
+  const scanRange = Math.floor((idealCutY - minY) * 0.4);
+  const scanLimit = Math.max(idealCutY - scanRange, minY);
+  const requiredGap = 3;
+
+  let consecutiveBlanks = 0;
+
+  for (let y = Math.min(idealCutY, canvasHeight - 1); y > scanLimit; y--) {
+    if (isRowBlank(ctx, y, canvasWidth)) {
+      consecutiveBlanks++;
+      if (consecutiveBlanks >= requiredGap) {
+        return y + Math.floor(requiredGap / 2);
+      }
+    } else {
+      consecutiveBlanks = 0;
+    }
+  }
+
+  return idealCutY;
+}
+
+/**
  * Generate PDF from HTML content
  */
 export async function generatePDFFromHTML(
   htmlContent: string,
   filename: string = 'document.pdf'
 ): Promise<Blob> {
-  // Create a temporary container
   const container = document.createElement('div');
   container.style.position = 'absolute';
   container.style.left = '-9999px';
-  container.style.width = '210mm'; // A4 width
+  container.style.width = '210mm';
+  container.style.padding = '15mm 18mm';
+  container.style.boxSizing = 'border-box';
+  container.style.backgroundColor = 'white';
+  container.style.color = '#1e293b';
+  container.style.fontSize = '14px';
+  container.style.lineHeight = '1.6';
   container.innerHTML = htmlContent;
   document.body.appendChild(container);
-  
+
   try {
-    // Convert HTML to canvas
     const canvas = await html2canvas(container, {
       scale: 2,
       useCORS: true,
       logging: false,
     });
-    
-    // Create PDF
-    const imgData = canvas.toDataURL('image/png');
+
     const pdf = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
       format: 'a4',
     });
-    
-    const imgWidth = 210; // A4 width in mm
-    const pageHeight = 297; // A4 height in mm
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-    let heightLeft = imgHeight;
-    let position = 0;
-    
-    // Add first page
-    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
-    
-    // Add additional pages if needed
-    while (heightLeft > 0) {
-      position = heightLeft - imgHeight;
-      pdf.addPage();
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
+
+    const pdfPageW = 210;
+    const pdfPageH = 297;
+    const pxPerMm = canvas.width / pdfPageW;
+    const pageHPx = Math.floor(pdfPageH * pxPerMm);
+    const topPadPx = Math.floor(10 * pxPerMm);
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas context unavailable');
+
+    let yOffset = 0;
+    let isFirstPage = true;
+
+    while (yOffset < canvas.height) {
+      let sliceH: number;
+
+      if (yOffset + pageHPx >= canvas.height) {
+        sliceH = canvas.height - yOffset;
+      } else {
+        const safeCutY = findSafeCutY(ctx, yOffset + pageHPx, canvas.width, canvas.height, yOffset);
+        sliceH = safeCutY - yOffset;
+      }
+
+      const pageCanvas = document.createElement('canvas');
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = isFirstPage ? sliceH : sliceH + topPadPx;
+      const pCtx = pageCanvas.getContext('2d')!;
+      pCtx.fillStyle = '#ffffff';
+      pCtx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      pCtx.drawImage(
+        canvas,
+        0, yOffset, canvas.width, sliceH,
+        0, isFirstPage ? 0 : topPadPx, canvas.width, sliceH
+      );
+
+      if (!isFirstPage) pdf.addPage();
+
+      const sliceImgData = pageCanvas.toDataURL('image/png');
+      const sliceHMm = (pageCanvas.height / pxPerMm);
+      pdf.addImage(sliceImgData, 'PNG', 0, 0, pdfPageW, sliceHMm);
+
+      yOffset += sliceH;
+      isFirstPage = false;
     }
-    
-    // Convert to blob
+
     return pdf.output('blob');
   } finally {
-    // Clean up
     document.body.removeChild(container);
   }
 }

@@ -278,7 +278,8 @@ export function NewQuotePage() {
     
     const link = getShareLink();
     const customerPhone = customer.phone.replace(/\s+/g, '');
-    const message = `Hi ${customer.name}, here is your solar quote from ${user?.companyName || 'heliOS'}: ${link}`;
+    const company = user?.companyId ? getCompany(user.companyId) : null;
+    const message = `Hi ${customer.name}, here is your solar quote from ${company?.name || 'our team'}: ${link}`;
     const whatsappUrl = `https://wa.me/${customerPhone}?text=${encodeURIComponent(message)}`;
     
     window.open(whatsappUrl, '_blank');
@@ -296,7 +297,7 @@ export function NewQuotePage() {
           name: customer.name,
         },
         shareLink: getShareLink(),
-        companyName: user.companyName || 'heliOS Platform',
+        companyName: (user.companyId ? getCompany(user.companyId)?.name : '') || 'Your Company',
         companyEmail: user.email || '',
         companyPhone: '+44 782346382', // Placeholder if not in user object
       });

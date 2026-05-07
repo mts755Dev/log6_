@@ -454,38 +454,38 @@ function buildQuoteHtml(quote: Quote, companyData: any): string {
     const itemTotal = item.quantity * item.unitPrice;
     return `
     <tr>
-      <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">${item.description}</td>
-      <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: center;">${item.quantity}</td>
-      <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: right;">£${item.unitPrice.toFixed(2)}</td>
-      <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: bold;">£${itemTotal.toFixed(2)}</td>
+      <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; color: #1e293b;">${item.description}</td>
+      <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: center; color: #1e293b;">${item.quantity}</td>
+      <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: right; color: #1e293b;">£${item.unitPrice.toFixed(2)}</td>
+      <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: bold; color: #0f172a;">£${itemTotal.toFixed(2)}</td>
     </tr>
   `;
   }).join('');
 
   return `
-    <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 40px;">
+    <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 40px; color: #1e293b;">
       <div style="text-align: center; margin-bottom: 40px;">
         ${companyData.logo_url ? `<img src="${companyData.logo_url}" alt="Logo" style="max-width: 200px; margin-bottom: 20px;">` : ''}
         <h1 style="color: #1e40af; margin: 0; font-size: 32px;">Battery Storage Quotation</h1>
-        <p style="color: #64748b; margin: 10px 0;">Quote Reference: ${quote.id.slice(0, 8).toUpperCase()}</p>
+        <p style="color: #475569; margin: 10px 0; font-size: 14px;">Quote Reference: ${quote.id.slice(0, 8).toUpperCase()}</p>
       </div>
 
-      <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
-        <h2 style="color: #1e40af; margin-top: 0;">Customer Details</h2>
-        <p style="margin: 5px 0;"><strong>Name:</strong> ${quote.customer.name}</p>
-        <p style="margin: 5px 0;"><strong>Email:</strong> ${quote.customer.email}</p>
-        <p style="margin: 5px 0;"><strong>Phone:</strong> ${quote.customer.phone}</p>
-        <p style="margin: 5px 0;"><strong>Address:</strong> ${quote.customer.address}</p>
+      <div style="background: #f0f4f8; padding: 20px; border-radius: 8px; margin-bottom: 30px; border: 1px solid #e2e8f0;">
+        <h2 style="color: #1e40af; margin-top: 0; font-size: 18px;">Customer Details</h2>
+        <p style="margin: 8px 0; color: #0f172a; font-size: 14px;"><strong>Name:</strong> ${quote.customer.name}</p>
+        <p style="margin: 8px 0; color: #0f172a; font-size: 14px;"><strong>Email:</strong> ${quote.customer.email}</p>
+        <p style="margin: 8px 0; color: #0f172a; font-size: 14px;"><strong>Phone:</strong> ${quote.customer.phone}</p>
+        <p style="margin: 8px 0; color: #0f172a; font-size: 14px;"><strong>Address:</strong> ${quote.customer.address}</p>
       </div>
 
-      <h2 style="color: #1e40af;">Quote Details</h2>
+      <h2 style="color: #1e40af; font-size: 18px;">Quote Details</h2>
       <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
         <thead>
-          <tr style="background: #f1f5f9;">
-            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #cbd5e1;">Item</th>
-            <th style="padding: 12px; text-align: center; border-bottom: 2px solid #cbd5e1;">Qty</th>
-            <th style="padding: 12px; text-align: right; border-bottom: 2px solid #cbd5e1;">Unit Price</th>
-            <th style="padding: 12px; text-align: right; border-bottom: 2px solid #cbd5e1;">Total</th>
+          <tr style="background: #1e40af;">
+            <th style="padding: 12px; text-align: left; color: #ffffff; font-weight: 600;">Item</th>
+            <th style="padding: 12px; text-align: center; color: #ffffff; font-weight: 600;">Qty</th>
+            <th style="padding: 12px; text-align: right; color: #ffffff; font-weight: 600;">Unit Price</th>
+            <th style="padding: 12px; text-align: right; color: #ffffff; font-weight: 600;">Total</th>
           </tr>
         </thead>
         <tbody>
@@ -493,34 +493,34 @@ function buildQuoteHtml(quote: Quote, companyData: any): string {
         </tbody>
       </table>
 
-      <div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #cbd5e1;">
+      <div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #cbd5e1; color: #1e293b;">
         <div style="display: flex; justify-content: space-between; margin: 10px 0;">
-          <span>Subtotal:</span>
-          <span>£${quote.subtotal.toFixed(2)}</span>
+          <span style="color: #334155; font-size: 14px;">Subtotal:</span>
+          <span style="color: #0f172a; font-weight: 600; font-size: 14px;">£${quote.subtotal.toFixed(2)}</span>
         </div>
         <div style="display: flex; justify-content: space-between; margin: 10px 0;">
-          <span>VAT (${quote.vatRate}%):</span>
-          <span>£${quote.vatAmount.toFixed(2)}</span>
+          <span style="color: #334155; font-size: 14px;">VAT (${quote.vatRate}%):</span>
+          <span style="color: #0f172a; font-weight: 600; font-size: 14px;">£${quote.vatAmount.toFixed(2)}</span>
         </div>
         <div style="display: flex; justify-content: space-between; margin: 20px 0; font-size: 20px; font-weight: bold; color: #1e40af;">
           <span>Total:</span>
           <span>£${quote.total.toFixed(2)}</span>
         </div>
-        <div style="background: #fef3c7; padding: 15px; border-radius: 8px; margin-top: 20px;">
+        <div style="background: #fef3c7; padding: 15px; border-radius: 8px; margin-top: 20px; border: 1px solid #fbbf24;">
           <div style="display: flex; justify-content: space-between; margin: 5px 0;">
-            <span><strong>Deposit (${depositPercentage}%):</strong></span>
-            <span><strong>£${quote.deposit.toFixed(2)}</strong></span>
+            <span style="color: #78350f; font-weight: 700;">Deposit (${depositPercentage}%):</span>
+            <span style="color: #78350f; font-weight: 700;">£${quote.deposit.toFixed(2)}</span>
           </div>
           <div style="display: flex; justify-content: space-between; margin: 5px 0;">
-            <span>Final Balance:</span>
-            <span>£${(quote.total - quote.deposit).toFixed(2)}</span>
+            <span style="color: #92400e;">Final Balance:</span>
+            <span style="color: #92400e; font-weight: 600;">£${(quote.total - quote.deposit).toFixed(2)}</span>
           </div>
         </div>
       </div>
 
-      <div style="margin-top: 40px; padding: 20px; background: #f8fafc; border-left: 4px solid #3b82f6; border-radius: 4px;">
-        <p style="margin: 0; color: #475569;"><strong>Valid Until:</strong> ${quote.validUntil ? new Date(quote.validUntil).toLocaleDateString('en-GB') : 'N/A'}</p>
-        <p style="margin: 10px 0 0 0; color: #475569;"><strong>Company:</strong> ${companyData.name}</p>
+      <div style="margin-top: 40px; padding: 20px; background: #f0f4f8; border-left: 4px solid #3b82f6; border-radius: 4px;">
+        <p style="margin: 0; color: #1e293b; font-size: 14px;"><strong>Valid Until:</strong> ${quote.validUntil ? new Date(quote.validUntil).toLocaleDateString('en-GB') : 'N/A'}</p>
+        <p style="margin: 10px 0 0 0; color: #1e293b; font-size: 14px;"><strong>Company:</strong> ${companyData.name}</p>
       </div>
     </div>
   `;

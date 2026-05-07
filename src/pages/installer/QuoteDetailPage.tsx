@@ -65,6 +65,7 @@ export function QuoteDetailPage() {
   const [isGeneratingToken, setIsGeneratingToken] = useState(false);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [resolvedCompanyName, setResolvedCompanyName] = useState('');
 
   // Fetch fresh quote data on mount and when id changes
   useEffect(() => {
@@ -72,6 +73,22 @@ export function QuoteDetailPage() {
       fetchFreshQuote();
     }
   }, [id]);
+
+  useEffect(() => {
+    const fetchCompanyName = async () => {
+      if (user?.companyName) {
+        setResolvedCompanyName(user.companyName);
+      } else if (user?.companyId) {
+        const { data } = await supabase
+          .from('companies')
+          .select('name')
+          .eq('id', user.companyId)
+          .single();
+        if (data?.name) setResolvedCompanyName(data.name);
+      }
+    };
+    fetchCompanyName();
+  }, [user?.companyId, user?.companyName]);
 
   const fetchFreshQuote = async () => {
     if (!id) return;
@@ -157,7 +174,7 @@ export function QuoteDetailPage() {
     if (!quote || !user) return;
     setIsExporting(true);
     try {
-      await generateQuotePDF(quote, user.companyName || 'heliOS Platform');
+      await generateQuotePDF(quote, resolvedCompanyName || 'Your Company');
     } catch (error) {
       console.error('Error generating PDF:', error);
     } finally {
@@ -275,7 +292,7 @@ export function QuoteDetailPage() {
     
     const link = getShareLink();
     const customerPhone = quote.customer.phone.replace(/\s+/g, '');
-    const message = `Hi ${quote.customer.name}, here is your solar quote from ${user?.companyName || 'heliOS'}: ${link}`;
+    const message = `Hi ${quote.customer.name}, here is your solar quote from ${resolvedCompanyName || 'our team'}: ${link}`;
     const whatsappUrl = `https://wa.me/${customerPhone}?text=${encodeURIComponent(message)}`;
     
     window.open(whatsappUrl, '_blank');
@@ -309,7 +326,7 @@ export function QuoteDetailPage() {
           name: quote.customer.name,
         },
         shareLink: getShareLink(),
-        companyName: user.companyName || 'heliOS Platform',
+        companyName: resolvedCompanyName || 'Your Company',
         companyEmail: user.email || '',
         companyPhone: '+44 782346382',
       });
@@ -318,7 +335,7 @@ export function QuoteDetailPage() {
         toast.success('Email sent successfully to customer!');
       } else {
         // If email service fails, open default email client as fallback
-        const subject = encodeURIComponent(`Your Quote from ${user.companyName || 'heliOS'} - ${quote.reference}`);
+        const subject = encodeURIComponent(`Your Quote from ${resolvedCompanyName || 'us'} - ${quote.reference}`);
         const body = encodeURIComponent(
           `Hi ${quote.customer.name},\n\n` +
           `Thank you for your interest in battery storage. We've prepared a personalized proposal for you.\n\n` +
@@ -326,7 +343,7 @@ export function QuoteDetailPage() {
           `Total Investment: £${quote.total.toLocaleString()}\n` +
           `Estimated Annual Savings: £${quote.annualSavings.toLocaleString()}\n\n` +
           `View your quote here:\n${getShareLink()}\n\n` +
-          `Best regards,\n${user.companyName || 'heliOS Platform'}`
+          `Best regards,\n${resolvedCompanyName || 'Your Company'}`
         );
         const mailtoLink = `mailto:${quote.customer.email}?subject=${subject}&body=${body}`;
         window.location.href = mailtoLink;

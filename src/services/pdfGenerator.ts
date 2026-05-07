@@ -84,7 +84,7 @@ export async function generateQuotePDF(quote: Quote, companyName: string): Promi
   yPos = 25;
 
   // Logo and Company
-  text('heliOS', margin, yPos, { size: 28, color: colors.primaryDark, bold: true });
+  text(companyName, margin, yPos, { size: 28, color: colors.primaryDark, bold: true });
   text('Battery Storage Solutions', margin, yPos + 8, { size: 10, color: colors.muted });
 
   // Quote reference badge
@@ -207,29 +207,34 @@ export async function generateQuotePDF(quote: Quote, companyName: string): Promi
     text(item.value, itemX, yPos + 17, { size: 10, color: colors.dark, bold: true });
   });
 
-  // Footer
-  const footerY = pageHeight - 15;
-  line(footerY - 8, colors.border);
-  text('Page 1 of 2', 0, footerY, { size: 8, color: colors.muted, align: 'center' });
-  text('© 2025 heliOS Technologies Ltd', pageWidth - margin, footerY, { size: 8, color: colors.muted, align: 'right' });
-
   // ============================================================
-  // PAGE 2: DETAILED BREAKDOWN
+  // PAGE 2+: DETAILED BREAKDOWN (with dynamic page breaks)
   // ============================================================
   doc.addPage();
   yPos = margin;
 
-  // Top accent bar
-  rect(0, 0, pageWidth, 8, colors.primary);
+  let pageNum = 2;
+  const footerReserve = 35;
 
-  yPos = 25;
+  const drawPageHeader = () => {
+    rect(0, 0, pageWidth, 8, colors.primary);
+    text(companyName, margin, 25, { size: 16, color: colors.primaryDark, bold: true });
+    text(quote.reference, pageWidth - margin, 25, { size: 11, color: colors.muted, align: 'right' });
+    line(45, colors.border);
+  };
 
-  // Header
-  text('heliOS', margin, yPos, { size: 16, color: colors.primaryDark, bold: true });
-  text(quote.reference, pageWidth - margin, yPos, { size: 11, color: colors.muted, align: 'right' });
+  const ensureSpace = (needed: number) => {
+    if (yPos + needed > pageHeight - footerReserve) {
+      doc.addPage();
+      pageNum++;
+      drawPageHeader();
+      yPos = 55;
+    }
+  };
 
-  yPos = 45;
-  line(yPos, colors.border);
+  // Top accent bar & header
+  drawPageHeader();
+
   yPos = 55;
 
   // Products & Services
@@ -250,6 +255,9 @@ export async function generateQuotePDF(quote: Quote, companyName: string): Promi
   // Table rows
   quote.lineItems.forEach((item, index) => {
     const rowHeight = 14;
+
+    ensureSpace(rowHeight);
+
     const isEven = index % 2 === 0;
     
     if (isEven) {
@@ -275,6 +283,7 @@ export async function generateQuotePDF(quote: Quote, companyName: string): Promi
 
   // Totals section
   yPos += 8;
+  ensureSpace(45);
   line(yPos, colors.border);
   yPos += 12;
 
@@ -295,22 +304,57 @@ export async function generateQuotePDF(quote: Quote, companyName: string): Promi
 
   yPos += 30;
 
-  // Deposit callout
-  rect(margin, yPos, tableWidth, 25, colors.light, 6);
-  outlineRect(margin, yPos, tableWidth, 25, colors.primary, 6);
-  text('Deposit Required', margin + 15, yPos + 10, { size: 10, color: colors.dark, bold: true });
-  text(`£${quote.deposit.toLocaleString()}`, margin + 15, yPos + 18, { size: 9, color: colors.muted });
-  text('Balance due upon completion', margin + tableWidth - 15, yPos + 14, { size: 9, color: colors.muted, align: 'right' });
+  // Deposit + Chart block: keep together if possible, otherwise break before deposit
+  const chartHeight = 60;
+  const depositBlockH = 40;
+  const chartBlockH = chartHeight + 35;
+  const combinedH = depositBlockH + chartBlockH;
 
-  yPos += 40;
+  if (yPos + combinedH > pageHeight - footerReserve) {
+    if (yPos + depositBlockH <= pageHeight - footerReserve) {
+      // Deposit fits on this page, chart goes to next page
+      rect(margin, yPos, tableWidth, 25, colors.light, 6);
+      outlineRect(margin, yPos, tableWidth, 25, colors.primary, 6);
+      text('Deposit Required', margin + 15, yPos + 10, { size: 10, color: colors.dark, bold: true });
+      text(`£${quote.deposit.toLocaleString()}`, margin + 15, yPos + 18, { size: 9, color: colors.muted });
+      text('Balance due upon completion', margin + tableWidth - 15, yPos + 14, { size: 9, color: colors.muted, align: 'right' });
+      yPos += depositBlockH;
+
+      doc.addPage();
+      pageNum++;
+      drawPageHeader();
+      yPos = 55;
+    } else {
+      // Neither fits – break before deposit
+      doc.addPage();
+      pageNum++;
+      drawPageHeader();
+      yPos = 55;
+
+      rect(margin, yPos, tableWidth, 25, colors.light, 6);
+      outlineRect(margin, yPos, tableWidth, 25, colors.primary, 6);
+      text('Deposit Required', margin + 15, yPos + 10, { size: 10, color: colors.dark, bold: true });
+      text(`£${quote.deposit.toLocaleString()}`, margin + 15, yPos + 18, { size: 9, color: colors.muted });
+      text('Balance due upon completion', margin + tableWidth - 15, yPos + 14, { size: 9, color: colors.muted, align: 'right' });
+      yPos += depositBlockH;
+    }
+  } else {
+    // Both fit on current page
+    rect(margin, yPos, tableWidth, 25, colors.light, 6);
+    outlineRect(margin, yPos, tableWidth, 25, colors.primary, 6);
+    text('Deposit Required', margin + 15, yPos + 10, { size: 10, color: colors.dark, bold: true });
+    text(`£${quote.deposit.toLocaleString()}`, margin + 15, yPos + 18, { size: 9, color: colors.muted });
+    text('Balance due upon completion', margin + tableWidth - 15, yPos + 14, { size: 9, color: colors.muted, align: 'right' });
+    yPos += depositBlockH;
+  }
 
   // 10-Year Projection
+  ensureSpace(chartBlockH);
   text('10-Year Savings Projection', margin, yPos, { size: 14, color: colors.dark, bold: true });
   yPos += 12;
 
   // Mini chart representation using bars
   const chartWidth = tableWidth;
-  const chartHeight = 60;
   const barCount = 10;
   const barWidth = (chartWidth - 40) / barCount;
   const maxSavings = Math.max(...quote.roiProjections.map(p => p.cumulativeSavings));
@@ -336,6 +380,7 @@ export async function generateQuotePDF(quote: Quote, companyName: string): Promi
 
   // Notes section
   if (quote.notes) {
+    ensureSpace(50);
     text('Notes', margin, yPos, { size: 14, color: colors.dark, bold: true });
     yPos += 10;
     
@@ -347,6 +392,7 @@ export async function generateQuotePDF(quote: Quote, companyName: string): Promi
   yPos += 15;
 
   // Terms
+  ensureSpace(55);
   text('Terms & Conditions', margin, yPos, { size: 12, color: colors.dark, bold: true });
   yPos += 10;
   
@@ -363,11 +409,15 @@ export async function generateQuotePDF(quote: Quote, companyName: string): Promi
     yPos += 6;
   });
 
-  // Footer
-  const footer2Y = pageHeight - 15;
-  line(footer2Y - 8, colors.border);
-  text('Page 2 of 2', 0, footer2Y, { size: 8, color: colors.muted, align: 'center' });
-  text('© 2025 heliOS Technologies Ltd', pageWidth - margin, footer2Y, { size: 8, color: colors.muted, align: 'right' });
+  // Draw footers on all pages
+  const totalPages = pageNum;
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    const fY = pageHeight - 15;
+    line(fY - 8, colors.border);
+    text(`Page ${p} of ${totalPages}`, 0, fY, { size: 8, color: colors.muted, align: 'center' });
+    text(`© ${new Date().getFullYear()} ${companyName}`, pageWidth - margin, fY, { size: 8, color: colors.muted, align: 'right' });
+  }
 
   // Save
   doc.save(`${quote.reference}-Proposal.pdf`);
