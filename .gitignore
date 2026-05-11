@@ -30,6 +30,9 @@ dist-ssr
 .env.test.local
 .env.production.local
 
+# heliOS mobile app (not ready for push yet)
+heliOS/
+
 # Supabase
 supabase/migrations/*.sql
 supabase/.branches

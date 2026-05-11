@@ -55,10 +55,21 @@ export interface Company {
   
   // Insurance & Compliance
   insurance_provider?: 'QANW' | 'HICE' | 'REC' | null;
+  consumerCode?: ConsumerCode;
   
   // Timestamps
   createdAt: string;
 }
+
+export type ConsumerCode = 'RECC' | 'HIES' | 'NAPIT' | 'TrustMark' | 'MCS';
+
+export const CONSUMER_CODE_LABELS: Record<ConsumerCode, string> = {
+  RECC: 'RECC — Renewable Energy Consumer Code',
+  HIES: 'HIES — Home Insulation & Energy Systems',
+  NAPIT: 'NAPIT Consumer Code',
+  TrustMark: 'TrustMark',
+  MCS: 'MCS — Microgeneration Certification Scheme',
+};
 
 // Product Types
 export interface BatteryProduct {
@@ -591,4 +602,31 @@ export interface DocumentNotification {
   isRead: boolean;
   readAt?: string;
   createdAt: string;
+}
+
+// ============================================================================
+// NOMINATED TECHNICAL PERSONS
+// ============================================================================
+
+export type NTPSpecialization = 'heat_pumps' | 'solar' | 'battery_storage' | 'ev_charging';
+
+export const NTP_SPECIALIZATION_LABELS: Record<NTPSpecialization, string> = {
+  heat_pumps: 'Heat Pumps',
+  solar: 'Solar PV',
+  battery_storage: 'Battery Storage',
+  ev_charging: 'EV Charging',
+};
+
+export interface NominatedTechnicalPerson {
+  id: string;
+  companyId: string;
+  fullName: string;
+  email?: string;
+  phone?: string;
+  specializations: NTPSpecialization[];
+  idDocumentUrl?: string;
+  qualificationCardUrls: string[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 }

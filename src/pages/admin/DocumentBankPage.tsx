@@ -40,6 +40,7 @@ export function DocumentBankPage() {
     description: '',
     category: 'consumer_code_leaflet' as DocumentCategory,
     insuranceProvider: '' as InsuranceProvider | '',
+    consumerCode: '',
     productId: '',
     productType: '' as ProductType | '',
     file: null as File | null,
@@ -169,8 +170,8 @@ export function DocumentBankPage() {
     }
 
     // Validation based on category
-    if (uploadForm.category === 'consumer_code_leaflet' && !uploadForm.insuranceProvider) {
-      toast.error('Please select an insurance provider for consumer code leaflets');
+    if (uploadForm.category === 'consumer_code_leaflet' && !uploadForm.consumerCode && !uploadForm.insuranceProvider) {
+      toast.error('Please select a consumer code or insurance provider for consumer code leaflets');
       return;
     }
 
@@ -208,6 +209,7 @@ export function DocumentBankPage() {
         file_size: uploadForm.file.size,
         mime_type: uploadForm.file.type,
         insurance_provider: uploadForm.insuranceProvider || null,
+        consumer_code: uploadForm.consumerCode || null,
         product_id: uploadForm.productId || null,
         product_type: uploadForm.productType || null,
       });
@@ -221,6 +223,7 @@ export function DocumentBankPage() {
         description: '',
         category: 'consumer_code_leaflet',
         insuranceProvider: '',
+        consumerCode: '',
         productId: '',
         productType: '',
         file: null,
@@ -581,21 +584,40 @@ export function DocumentBankPage() {
           </div>
 
           {uploadForm.category === 'consumer_code_leaflet' && (
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                Insurance Provider *
-              </label>
-              <select
-                value={uploadForm.insuranceProvider}
-                onChange={(e) => setUploadForm({ ...uploadForm, insuranceProvider: e.target.value as InsuranceProvider })}
-                className="input"
-              >
-                <option value="">Select Provider...</option>
-                <option value="QANW">QANW</option>
-                <option value="HICE">HICE</option>
-                <option value="REC">REC</option>
-              </select>
-            </div>
+            <>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Consumer Code *
+                </label>
+                <select
+                  value={uploadForm.consumerCode}
+                  onChange={(e) => setUploadForm({ ...uploadForm, consumerCode: e.target.value })}
+                  className="input"
+                >
+                  <option value="">Select Consumer Code...</option>
+                  <option value="RECC">RECC — Renewable Energy Consumer Code</option>
+                  <option value="HIES">HIES — Home Insulation & Energy Systems</option>
+                  <option value="NAPIT">NAPIT Consumer Code</option>
+                  <option value="TrustMark">TrustMark</option>
+                  <option value="MCS">MCS — Microgeneration Certification Scheme</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Insurance Provider (optional, legacy)
+                </label>
+                <select
+                  value={uploadForm.insuranceProvider}
+                  onChange={(e) => setUploadForm({ ...uploadForm, insuranceProvider: e.target.value as InsuranceProvider })}
+                  className="input"
+                >
+                  <option value="">None</option>
+                  <option value="QANW">QANW</option>
+                  <option value="HICE">HICE</option>
+                  <option value="REC">REC</option>
+                </select>
+              </div>
+            </>
           )}
 
           {uploadForm.category === 'product_datasheet' && (

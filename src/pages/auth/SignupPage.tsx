@@ -1,21 +1,26 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, Lock, ArrowRight, Shield, Wrench, Users, Sun, Battery, Zap, User, Phone, Building2, FileText, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import {
+  Mail, Lock, ArrowRight, Shield, Wrench, Users, Sun, Battery, Zap,
+  User, Phone, Building2, FileText, ArrowLeft, CheckCircle2, Clock,
+  ChevronDown, AlertTriangle, Circle,
+} from 'lucide-react';
 import { Logo } from '../../components/ui/Logo';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
-import { FileUpload } from '../../components/ui/FileUpload';
-import { FileUploadWithDates } from '../../components/ui/FileUploadWithDates';
 import { Select } from '../../components/ui/Select';
+import { MultiFileUpload, type DocumentGroup } from '../../components/ui/MultiFileUpload';
 import { supabase } from '../../lib/supabase';
 import { uploadDocument, saveDocumentMetadata, getNextDocumentVersion } from '../../lib/storage';
-import type { UserRole } from '../../types';
+import { scanDocument, terminateWorker } from '../../utils/documentScanner';
+import type { UserRole, ConsumerCode } from '../../types';
+import { CONSUMER_CODE_LABELS } from '../../types';
 
-const roleConfig: Record<UserRole, { 
-  title: string; 
-  subtitle: string; 
-  icon: React.ReactNode; 
+const roleConfig: Record<UserRole, {
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
   color: string;
   bgColor: string;
 }> = {
@@ -56,411 +61,371 @@ const roleConfig: Record<UserRole, {
   },
 };
 
+type DocumentKey = 'competencyCards' | 'certificates' | 'insurance' | 'mcsCertificate' | 'insuranceBackedGuarantee' | 'wasteLicense';
+
+const DOC_TYPE_MAP: Record<DocumentKey, string> = {
+  competencyCards: 'competency_cards',
+  certificates: 'course_certificates',
+  insurance: 'insurance',
+  mcsCertificate: 'mcs_certificate',
+  insuranceBackedGuarantee: 'ibg_certificate',
+  wasteLicense: 'waste_carrier_license',
+};
+
+interface DocSectionConfig {
+  key: DocumentKey;
+  label: string;
+  description: string;
+  showDates: boolean;
+  showReference: boolean;
+  showProvider: boolean;
+  groupLabel: string;
+}
+
+const documentSections: DocSectionConfig[] = [
+  { key: 'competencyCards', label: 'Competency Cards', description: 'Upload competency cards with dates', showDates: true, showReference: true, showProvider: true, groupLabel: 'card' },
+  { key: 'certificates', label: 'Course Completion Certificates', description: 'Certificates of course completion', showDates: true, showReference: true, showProvider: true, groupLabel: 'certificate' },
+  { key: 'insurance', label: 'Insurance Documents', description: 'Public liability and professional indemnity insurance', showDates: true, showReference: true, showProvider: true, groupLabel: 'document' },
+  { key: 'mcsCertificate', label: 'MCS Certificate', description: 'MCS certificate', showDates: true, showReference: true, showProvider: false, groupLabel: 'certificate' },
+  { key: 'insuranceBackedGuarantee', label: 'IBG Provider Certificate', description: 'Insurance Backed Guarantee certificate', showDates: true, showReference: true, showProvider: true, groupLabel: 'certificate' },
+];
+
+const EMPTY_GROUP: DocumentGroup = {
+  files: [], issuedDate: '', expiryDate: '', referenceNumber: '', providerName: '', scanStatus: 'idle',
+};
+
 export function SignupPage() {
   const { role } = useParams<{ role: UserRole }>();
   const navigate = useNavigate();
-  
+
   const [currentStep, setCurrentStep] = useState(0);
   const [formData, setFormData] = useState({
-    fullName: '',
-    email: '',
-    phone: '',
-    companyName: '',
-    password: '',
-    confirmPassword: '',
+    fullName: '', email: '', phone: '', companyName: '', password: '', confirmPassword: '',
   });
-  
-  // Document fields for installers (Step 2)
-  const [documents, setDocuments] = useState({
-    competencyCards: { file: null as File | null, issuedDate: '', expiryDate: '' },
-    certificates: null as File | null,
-    insurance: null as File | null,
-    mcsCertificate: null as File | null,
-    consumerCode: null as File | null,
-    insuranceBackedGuarantee: null as File | null,
-    useExternalWasteCarrier: '',
-    wasteLicense: null as File | null,
+
+  // Multi-file document groups per document type
+  const [docGroups, setDocGroups] = useState<Record<DocumentKey, DocumentGroup[]>>({
+    competencyCards: [{ ...EMPTY_GROUP }],
+    certificates: [{ ...EMPTY_GROUP }],
+    insurance: [{ ...EMPTY_GROUP }],
+    mcsCertificate: [{ ...EMPTY_GROUP }],
+    insuranceBackedGuarantee: [{ ...EMPTY_GROUP }],
+    wasteLicense: [{ ...EMPTY_GROUP }],
   });
-  
+
+  const [useExternalWasteCarrier, setUseExternalWasteCarrier] = useState('');
+  const [selectedConsumerCode, setSelectedConsumerCode] = useState('');
+  const [deferredDocuments, setDeferredDocuments] = useState<Record<string, boolean>>({});
+  const [expandedSection, setExpandedSection] = useState<string | null>(null);
+
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const config = role && roleConfig[role] ? roleConfig[role] : roleConfig.installer;
   const currentRole = role || 'installer';
+  const isInstaller = currentRole === 'installer';
+  const totalSteps = isInstaller ? 2 : 1;
 
-  // Add dark class to body for dashboard-style signup
   useEffect(() => {
     document.body.classList.add('dark');
-    return () => document.body.classList.remove('dark');
+    return () => {
+      document.body.classList.remove('dark');
+      terminateWorker();
+    };
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData(prev => ({
-      ...prev,
-      [e.target.name]: e.target.value
-    }));
+    setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
-  const handleDocumentChange = (name: string, file: File | null) => {
-    setDocuments(prev => ({
-      ...prev,
-      [name]: file
-    }));
+  const handleDocGroupsChange = useCallback((key: DocumentKey, groups: DocumentGroup[]) => {
+    setDocGroups(prev => ({ ...prev, [key]: groups }));
+    const hasFiles = groups.some(g => g.files.length > 0);
+    if (hasFiles) {
+      setDeferredDocuments(prev => ({ ...prev, [key]: false }));
+    }
+  }, []);
+
+  const handleScanFile = useCallback((key: DocumentKey) => {
+    return async (file: File, groupIndex: number) => {
+      setDocGroups(prev => {
+        const updated = [...prev[key]];
+        updated[groupIndex] = { ...updated[groupIndex], scanStatus: 'scanning' };
+        return { ...prev, [key]: updated };
+      });
+
+      try {
+        const result = await scanDocument(file);
+        setDocGroups(prev => {
+          const updated = [...prev[key]];
+          const group = { ...updated[groupIndex] };
+          const scanned: DocumentGroup['scannedFields'] = {};
+
+          if (result.issuedDate && !group.issuedDate) {
+            group.issuedDate = result.issuedDate;
+            scanned.issuedDate = result.issuedDate;
+          }
+          if (result.expiryDate && !group.expiryDate) {
+            group.expiryDate = result.expiryDate;
+            scanned.expiryDate = result.expiryDate;
+          }
+          if (result.referenceNumber && !group.referenceNumber) {
+            group.referenceNumber = result.referenceNumber;
+            scanned.referenceNumber = result.referenceNumber;
+          }
+          if (result.providerName && !group.providerName) {
+            group.providerName = result.providerName;
+            scanned.providerName = result.providerName;
+          }
+          if (result.holderName) scanned.holderName = result.holderName;
+          if (result.qualificationType) scanned.qualificationType = result.qualificationType;
+          if (result.organizationName) scanned.organizationName = result.organizationName;
+          if (result.cardNumber) scanned.cardNumber = result.cardNumber;
+          if (result.policyNumber) scanned.policyNumber = result.policyNumber;
+          if (result.membershipId) scanned.membershipId = result.membershipId;
+
+          group.scanStatus = 'done';
+          group.scannedFields = scanned;
+          group.rawText = result.rawText;
+          group.confidence = result.confidence;
+          updated[groupIndex] = group;
+          return { ...prev, [key]: updated };
+        });
+      } catch {
+        setDocGroups(prev => {
+          const updated = [...prev[key]];
+          updated[groupIndex] = { ...updated[groupIndex], scanStatus: 'error' };
+          return { ...prev, [key]: updated };
+        });
+      }
+    };
+  }, []);
+
+  const handleDeferToggle = (key: string) => {
+    setDeferredDocuments(prev => ({ ...prev, [key]: !prev[key] }));
+    if (!deferredDocuments[key]) {
+      setExpandedSection(null);
+    }
   };
 
-  // Check if step 1 (basic info) is complete
+  const getDocumentStatus = (key: DocumentKey): 'uploaded' | 'deferred' | 'pending' => {
+    const groups = docGroups[key];
+    if (groups.some(g => g.files.length > 0)) return 'uploaded';
+    if (deferredDocuments[key]) return 'deferred';
+    return 'pending';
+  };
+
+  const hasDeferredDocuments = Object.values(deferredDocuments).some(v => v);
+  const completedCount = documentSections.filter(s => getDocumentStatus(s.key) !== 'pending').length;
+
   const isStep1Complete = () => {
     return formData.fullName.trim() !== '' &&
-           formData.email.trim() !== '' &&
-           formData.password.length >= 6 &&
-           formData.confirmPassword === formData.password;
+      formData.email.trim() !== '' &&
+      formData.password.length >= 6 &&
+      formData.confirmPassword === formData.password;
   };
 
-  // Check if step 2 (documents) is complete for installers
   const isStep2Complete = () => {
-    if (currentRole !== 'installer') return true;
-    
-    return documents.competencyCards.file !== null &&
-           documents.competencyCards.issuedDate !== '' &&
-           documents.competencyCards.expiryDate !== '' &&
-           documents.certificates !== null &&
-           documents.insurance !== null &&
-           documents.mcsCertificate !== null &&
-           documents.consumerCode !== null &&
-           documents.insuranceBackedGuarantee !== null &&
-           documents.useExternalWasteCarrier !== '' &&
-           (documents.useExternalWasteCarrier === 'no' || documents.wasteLicense !== null);
+    if (!isInstaller) return true;
+    const allSectionsHandled = documentSections.every(s => getDocumentStatus(s.key) !== 'pending');
+    const consumerCodeSelected = selectedConsumerCode !== '';
+    const wasteCarrierAnswered = useExternalWasteCarrier !== '';
+    const wasteLicenseHandled = useExternalWasteCarrier === 'no' ||
+      docGroups.wasteLicense.some(g => g.files.length > 0) ||
+      deferredDocuments['wasteLicense'];
+    return allSectionsHandled && consumerCodeSelected && wasteCarrierAnswered && wasteLicenseHandled;
   };
 
   const handleNext = () => {
     setError('');
-    
-    // Validate step 1
-    if (!formData.fullName || !formData.email) {
-      setError('Please fill in all required fields');
-      return;
+    if (currentStep === 0) {
+      if (!formData.fullName || !formData.email) {
+        setError('Please fill in all required fields');
+        return;
+      }
+      if (formData.password !== formData.confirmPassword) {
+        setError('Passwords do not match');
+        return;
+      }
+      if (formData.password.length < 6) {
+        setError('Password must be at least 6 characters');
+        return;
+      }
     }
-
-    if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-
-    if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters');
-      return;
-    }
-
-    setCurrentStep(1);
+    setCurrentStep(prev => prev + 1);
   };
 
   const handleBack = () => {
     setError('');
-    setCurrentStep(0);
+    setCurrentStep(prev => prev - 1);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    // Validation
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
       return;
     }
-
     if (formData.password.length < 6) {
       setError('Password must be at least 6 characters');
       return;
     }
-
     if (!formData.fullName || !formData.email) {
       setError('Please fill in all required fields');
       return;
     }
-
-    // For installers, validate documents on step 2
-    if (currentRole === 'installer' && !isStep2Complete()) {
-      setError('Please upload all required documents');
+    if (isInstaller && !isStep2Complete()) {
+      setError('Please complete or defer all required documents');
       return;
     }
 
     setIsLoading(true);
     let userId: string | null = null;
-    let accountCreated = false;
 
     try {
-      // For non-installers, create account directly
-      if (currentRole !== 'installer') {
-        const metadata = {
-          full_name: formData.fullName,
-          role: currentRole,
-          phone: formData.phone || null,
-          company_name: formData.companyName || null,
-        };
-
-        const { data, error: signUpError } = await supabase.auth.signUp({
+      if (!isInstaller) {
+        const { error: signUpError } = await supabase.auth.signUp({
           email: formData.email,
           password: formData.password,
-          options: { data: metadata },
+          options: {
+            data: {
+              full_name: formData.fullName,
+              role: currentRole,
+              phone: formData.phone || null,
+              company_name: formData.companyName || null,
+            },
+          },
         });
-
         if (signUpError) {
           setError(signUpError.message);
           setIsLoading(false);
           return;
         }
-
-        // Success! Redirect to login
         navigate(`/login/${currentRole}`, {
-          state: { 
-            message: 'Account created successfully! Please sign in.',
-            email: formData.email 
-          }
+          state: { message: 'Account created successfully! Please sign in.', email: formData.email },
         });
         return;
       }
 
-      // For installers: First validate all documents are ready
-      if (currentRole === 'installer') {
-        console.log('Starting installer signup with documents...');
+      // Installer signup
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
+        options: {
+          data: {
+            full_name: formData.fullName,
+            role: currentRole,
+            phone: formData.phone || null,
+            company_name: formData.companyName || null,
+          },
+        },
+      });
 
-        // Prepare metadata
-        const metadata = {
-          full_name: formData.fullName,
-          role: currentRole,
-          phone: formData.phone || null,
-          company_name: formData.companyName || null,
-        };
+      if (signUpError) throw new Error(`Account creation failed: ${signUpError.message}`);
+      if (!data.user) throw new Error('Account creation failed: No user data returned');
+      userId = data.user.id;
 
-        // Create account
-        const { data, error: signUpError } = await supabase.auth.signUp({
-          email: formData.email,
-          password: formData.password,
-          options: { data: metadata },
+      // Create company
+      let companyId: string | null = null;
+      if (formData.companyName?.trim()) {
+        const { data: companyData, error: companyError } = await supabase
+          .from('companies')
+          .insert({
+            name: formData.companyName,
+            email: formData.email,
+            phone: formData.phone || '',
+            address: '',
+            postcode: '',
+            mcs_number: null,
+            is_umbrella_scheme: false,
+            owner_id: userId,
+            payment_model: null,
+            credit_balance: 5,
+            credit_price: 3.00,
+            subscription_tier: null,
+            subscription_status: 'trial',
+            subscription_end_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+            monthly_proposal_limit: null,
+            proposals_used_this_month: 0,
+            proposal_reset_date: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString(),
+            logo: null,
+            brand_color: '#eab308',
+            consumer_code: selectedConsumerCode || null,
+          })
+          .select('id')
+          .single();
+
+        if (companyError) {
+          console.warn('Company creation failed:', companyError);
+        } else if (companyData) {
+          companyId = companyData.id;
+          await supabase
+            .from('profiles')
+            .update({ company_id: companyId, phone: formData.phone || null })
+            .eq('id', userId);
+        }
+      }
+
+      // Upload documents (multi-file)
+      try {
+        for (const section of documentSections) {
+          if (deferredDocuments[section.key]) continue;
+          const groups = docGroups[section.key];
+          const dbType = DOC_TYPE_MAP[section.key];
+
+          for (const group of groups) {
+            for (const file of group.files) {
+              const version = await getNextDocumentVersion(userId, dbType);
+              const filePath = await uploadDocument(file, userId, dbType, version);
+              await saveDocumentMetadata(
+                userId, dbType, file.name, filePath, file.size, version,
+                group.issuedDate || undefined, group.expiryDate || undefined,
+              );
+            }
+          }
+        }
+
+        // Waste license
+        if (useExternalWasteCarrier === 'yes' && !deferredDocuments['wasteLicense']) {
+          for (const group of docGroups.wasteLicense) {
+            for (const file of group.files) {
+              const version = await getNextDocumentVersion(userId, 'waste_carrier_license');
+              const filePath = await uploadDocument(file, userId, 'waste_carrier_license', version);
+              await saveDocumentMetadata(userId, 'waste_carrier_license', file.name, filePath, file.size, version);
+            }
+          }
+        }
+
+        // Save installer settings
+        const { error: settingsError } = await supabase.from('installer_settings').insert({
+          user_id: userId,
+          use_external_waste_carrier: useExternalWasteCarrier === 'yes',
         });
+        if (settingsError) throw new Error(`Failed to save settings: ${settingsError.message}`);
 
-        if (signUpError) {
-          throw new Error(`Account creation failed: ${signUpError.message}`);
-        }
-
-        if (!data.user) {
-          throw new Error('Account creation failed: No user data returned');
-        }
-
-        userId = data.user.id;
-        accountCreated = true;
-        console.log('Account created successfully...');
-
-        // Create company if company name was provided
-        let companyId: string | null = null;
-        if (formData.companyName && formData.companyName.trim() !== '') {
-          console.log('Creating company record with 5 free trial credits...');
-          const { data: companyData, error: companyError } = await supabase
-            .from('companies')
-            .insert({
-              name: formData.companyName,
-              email: formData.email,
-              phone: formData.phone || '',
-              address: '',
-              postcode: '',
-              mcs_number: null,
-              is_umbrella_scheme: false,
-              owner_id: userId, // Link company to the user who created it
-              payment_model: null, // No payment model chosen yet - on trial
-              credit_balance: 5, // 5 FREE trial credits
-              credit_price: 3.00,
-              subscription_tier: null, // No tier yet - on trial
-              subscription_status: 'trial',
-              subscription_end_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(), // 14 day trial
-              monthly_proposal_limit: null,
-              proposals_used_this_month: 0,
-              proposal_reset_date: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString(),
-              logo: null,
-              brand_color: '#eab308',
-            })
-            .select('id')
-            .single();
-
-          if (companyError) {
-            console.warn('Company creation failed:', companyError);
-            // Don't fail the signup, just log it
-          } else if (companyData) {
-            companyId = companyData.id;
-            console.log('Company created successfully, linking to user profile...');
-
-            // Update user profile with company_id
-            const { error: profileError } = await supabase
-              .from('profiles')
-              .update({ company_id: companyId, phone: formData.phone || null })
-              .eq('id', userId);
-
-            if (profileError) {
-              console.warn('Failed to link company to profile:', profileError);
-            } else {
-              console.log('User profile linked to company successfully!');
-            }
-          }
-        }
-
-        console.log('Uploading documents...');
-
-        // Now upload documents
-        try {
-          // Upload competency cards with versioning and dates
-          if (documents.competencyCards.file) {
-            console.log('Uploading competency cards...');
-            const version = await getNextDocumentVersion(userId, 'competency_cards');
-            const filePath = await uploadDocument(
-              documents.competencyCards.file,
-              userId,
-              'competency_cards',
-              version
-            );
-            await saveDocumentMetadata(
-              userId,
-              'competency_cards',
-              documents.competencyCards.file.name,
-              filePath,
-              documents.competencyCards.file.size,
-              version,
-              documents.competencyCards.issuedDate,
-              documents.competencyCards.expiryDate
-            );
-          }
-
-          // Upload other certificates
-          if (documents.certificates) {
-            console.log('Uploading certificates...');
-            const version = await getNextDocumentVersion(userId, 'course_certificates');
-            const filePath = await uploadDocument(documents.certificates, userId, 'course_certificates', version);
-            await saveDocumentMetadata(
-              userId,
-              'course_certificates',
-              documents.certificates.name,
-              filePath,
-              documents.certificates.size,
-              version
-            );
-          }
-
-          // Upload insurance documents
-          if (documents.insurance) {
-            console.log('Uploading insurance...');
-            const version = await getNextDocumentVersion(userId, 'insurance');
-            const filePath = await uploadDocument(documents.insurance, userId, 'insurance', version);
-            await saveDocumentMetadata(
-              userId,
-              'insurance',
-              documents.insurance.name,
-              filePath,
-              documents.insurance.size,
-              version
-            );
-          }
-
-          // Upload MCS certificate
-          if (documents.mcsCertificate) {
-            console.log('Uploading MCS certificate...');
-            const version = await getNextDocumentVersion(userId, 'mcs_certificate');
-            const filePath = await uploadDocument(documents.mcsCertificate, userId, 'mcs_certificate', version);
-            await saveDocumentMetadata(
-              userId,
-              'mcs_certificate',
-              documents.mcsCertificate.name,
-              filePath,
-              documents.mcsCertificate.size,
-              version
-            );
-          }
-
-          // Upload consumer code
-          if (documents.consumerCode) {
-            console.log('Uploading consumer code...');
-            const version = await getNextDocumentVersion(userId, 'consumer_code_membership');
-            const filePath = await uploadDocument(documents.consumerCode, userId, 'consumer_code_membership', version);
-            await saveDocumentMetadata(
-              userId,
-              'consumer_code_membership',
-              documents.consumerCode.name,
-              filePath,
-              documents.consumerCode.size,
-              version
-            );
-          }
-
-          // Upload insurance backed guarantee
-          if (documents.insuranceBackedGuarantee) {
-            console.log('Uploading insurance backed guarantee...');
-            const version = await getNextDocumentVersion(userId, 'ibg_certificate');
-            const filePath = await uploadDocument(documents.insuranceBackedGuarantee, userId, 'ibg_certificate', version);
-            await saveDocumentMetadata(
-              userId,
-              'ibg_certificate',
-              documents.insuranceBackedGuarantee.name,
-              filePath,
-              documents.insuranceBackedGuarantee.size,
-              version
-            );
-          }
-
-          // Upload waste license if applicable
-          if (documents.useExternalWasteCarrier === 'yes' && documents.wasteLicense) {
-            console.log('Uploading waste license...');
-            const version = await getNextDocumentVersion(userId, 'waste_carrier_license');
-            const filePath = await uploadDocument(documents.wasteLicense, userId, 'waste_carrier_license', version);
-            await saveDocumentMetadata(
-              userId,
-              'waste_carrier_license',
-              documents.wasteLicense.name,
-              filePath,
-              documents.wasteLicense.size,
-              version
-            );
-          }
-
-          // Save waste carrier preference
-          console.log('Saving installer settings...');
-          const { error: settingsError } = await supabase.from('installer_settings').insert({
-            user_id: userId,
-            use_external_waste_carrier: documents.useExternalWasteCarrier === 'yes',
-          });
-
-          if (settingsError) {
-            throw new Error(`Failed to save settings: ${settingsError.message}`);
-          }
-
-          console.log('All documents uploaded successfully!');
-
-          // Success! Redirect to login
+        navigate(`/login/${currentRole}`, {
+          state: {
+            message: hasDeferredDocuments
+              ? 'Account created! Please sign in and upload remaining documents from the Onboarding page.'
+              : 'Account created successfully! Please sign in.',
+            email: formData.email,
+          },
+        });
+      } catch (uploadError: any) {
+        console.error('Document upload error:', uploadError);
+        setError(
+          `Account created but document upload failed: ${uploadError.message || 'Unknown error'}. ` +
+          `Please contact support or try uploading documents after logging in.`
+        );
+        setIsLoading(false);
+        setTimeout(() => {
           navigate(`/login/${currentRole}`, {
-            state: { 
-              message: 'Account created successfully! Please sign in.',
-              email: formData.email 
-            }
+            state: { message: 'Account created. Please sign in and upload documents.', email: formData.email },
           });
-
-        } catch (uploadError: any) {
-          console.error('Document upload error:', uploadError);
-          
-          // Account was created but documents failed
-          setError(
-            `Account created but document upload failed: ${uploadError.message || 'Unknown error'}. ` +
-            `Please contact support or try uploading documents after logging in.`
-          );
-          setIsLoading(false);
-          
-          // Still redirect to login after a delay so user can access their account
-          setTimeout(() => {
-            navigate(`/login/${currentRole}`, {
-              state: { 
-                message: 'Account created. Please sign in and upload documents.',
-                email: formData.email 
-              }
-            });
-          }, 5000);
-          return;
-        }
+        }, 5000);
+        return;
       }
     } catch (err: any) {
       console.error('Signup error:', err);
@@ -469,31 +434,169 @@ export function SignupPage() {
     }
   };
 
+  // ─── Render helpers ────────────────────────────────────────────
+
+  const renderDocumentSection = (section: DocSectionConfig) => {
+    const status = getDocumentStatus(section.key);
+    const isExpanded = expandedSection === section.key && !deferredDocuments[section.key];
+    const isDeferred = deferredDocuments[section.key];
+    const groups = docGroups[section.key];
+    const fileCount = groups.reduce((sum, g) => sum + g.files.length, 0);
+
+    return (
+      <div
+        key={section.key}
+        className={`border rounded-xl transition-all ${
+          status === 'uploaded'
+            ? 'border-green-500/30 bg-green-500/5'
+            : status === 'deferred'
+              ? 'border-amber-500/30 bg-amber-500/5'
+              : isExpanded
+                ? 'border-primary-500/40 bg-primary-500/5'
+                : 'border-slate-700/50 bg-slate-800/30 hover:border-slate-600'
+        }`}
+      >
+        <div
+          className="flex items-center gap-3 px-4 py-3 cursor-pointer"
+          onClick={() => {
+            if (isDeferred) return;
+            setExpandedSection(isExpanded ? null : section.key);
+          }}
+        >
+          <div className="flex-shrink-0">
+            {status === 'uploaded' ? (
+              <CheckCircle2 className="w-5 h-5 text-green-400" />
+            ) : status === 'deferred' ? (
+              <Clock className="w-5 h-5 text-amber-400" />
+            ) : (
+              <Circle className="w-5 h-5 text-slate-500" />
+            )}
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <p className={`text-sm font-medium ${
+              status === 'uploaded' ? 'text-green-300' : status === 'deferred' ? 'text-amber-300' : 'text-slate-200'
+            }`}>
+              {section.label}
+            </p>
+            {status === 'uploaded' && (
+              <p className="text-xs text-slate-400 truncate">
+                {fileCount} file{fileCount !== 1 ? 's' : ''} across {groups.filter(g => g.files.length > 0).length} {section.groupLabel}{groups.filter(g => g.files.length > 0).length !== 1 ? 's' : ''}
+              </p>
+            )}
+            {status === 'deferred' && (
+              <p className="text-xs text-amber-400/70">Will upload later</p>
+            )}
+          </div>
+
+          <label
+            className="flex items-center gap-2 text-xs cursor-pointer flex-shrink-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              checked={isDeferred}
+              onChange={() => handleDeferToggle(section.key)}
+              className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-800 text-amber-500 focus:ring-amber-500/20 cursor-pointer"
+            />
+            <span className="text-slate-400 whitespace-nowrap">Upload later</span>
+          </label>
+
+          {!isDeferred && (
+            <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-180' : ''}`} />
+          )}
+        </div>
+
+        <AnimatePresence>
+          {isExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className="px-4 pb-4 pt-1">
+                <MultiFileUpload
+                  label=""
+                  name={section.key}
+                  groups={groups}
+                  onChange={(g) => handleDocGroupsChange(section.key, g)}
+                  onScanFile={handleScanFile(section.key)}
+                  showDates={section.showDates}
+                  showReference={section.showReference}
+                  showProvider={section.showProvider}
+                  groupLabel={section.groupLabel}
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  };
+
+  const renderStepIndicator = () => {
+    if (!isInstaller) return null;
+    const steps = [
+      { label: 'Basic Information', sub: 'Account details' },
+      { label: 'Certifications', sub: 'Documents & licenses' },
+    ];
+    return (
+      <div className="mb-6 flex-shrink-0">
+        <div className="flex items-center gap-4">
+          {steps.map((step, i) => (
+            <div key={i} className="flex items-center gap-2 flex-1">
+              {i > 0 && (
+                <div className={`h-0.5 w-10 flex-shrink-0 ${currentStep > i - 1 ? 'bg-primary-500' : 'bg-slate-700'}`} />
+              )}
+              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 ${
+                currentStep === i
+                  ? 'bg-primary-500 text-white'
+                  : currentStep > i
+                    ? 'bg-green-500 text-white'
+                    : 'bg-slate-700 text-slate-400'
+              }`}>
+                {currentStep > i ? <CheckCircle2 className="w-4 h-4" /> : i + 1}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-white">{step.label}</p>
+                <p className="text-[10px] text-slate-500">{step.sub}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const canProceed = () => {
+    if (currentStep === 0) return isStep1Complete();
+    return true; // Step 3 is optional
+  };
+
+  const isLastStep = currentStep === totalSteps - 1;
+
   return (
     <div className="min-h-screen bg-slate-950 flex">
       {/* Left Panel - Branding */}
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, x: -50 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.5 }}
         className="hidden lg:flex lg:w-1/2 relative overflow-hidden bg-slate-900"
       >
-        {/* Background decoration */}
         <div className="absolute inset-0 bg-grid opacity-30" />
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary-500/10 rounded-full blur-3xl" />
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-energy-500/10 rounded-full blur-3xl" />
-        
+
         <div className="relative z-10 flex flex-col justify-between p-12 w-full">
           <Link to="/">
             <Logo size="xl" variant="dark" />
           </Link>
-          
+
           <div className="max-w-md">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2, duration: 0.5 }}
-            >
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2, duration: 0.5 }}>
               <div className="flex items-center gap-3 mb-6">
                 <Sun className="w-10 h-10 text-solar-400" />
                 <Battery className="w-10 h-10 text-energy-400" />
@@ -503,17 +606,12 @@ export function SignupPage() {
                 Join heliOS Today
               </h1>
               <p className="text-lg text-slate-400 mb-8">
-                Start generating professional battery storage quotes in minutes. 
+                Start generating professional battery storage quotes in minutes.
                 Join hundreds of UK installers already using heliOS.
               </p>
             </motion.div>
-            
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4, duration: 0.5 }}
-              className="grid grid-cols-2 gap-4"
-            >
+
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4, duration: 0.5 }} className="grid grid-cols-2 gap-4">
               {[
                 { label: 'Quote Generation', value: '< 2 min' },
                 { label: 'Active Installers', value: '500+' },
@@ -529,291 +627,181 @@ export function SignupPage() {
           </div>
 
           <div className="text-sm text-slate-500">
-            © 2025 heliOS Technologies Ltd. All rights reserved.
+            &copy; 2025 heliOS Technologies Ltd. All rights reserved.
           </div>
         </div>
       </motion.div>
 
       {/* Right Panel - Signup Form */}
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, x: 50 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.5 }}
-        className="w-full lg:w-1/2 flex items-center justify-center p-8 overflow-y-auto"
+        className={`w-full lg:w-1/2 flex flex-col p-8 ${currentStep === 0 ? 'overflow-y-auto justify-center items-center' : ''}`}
       >
-        <div className="w-full max-w-md">
+        <div className={`w-full ${currentStep === 0 ? 'max-w-md' : 'max-w-lg mx-auto flex flex-col h-full'}`}>
           {/* Mobile logo */}
-          <div className="lg:hidden mb-8">
-            <Link to="/">
-              <Logo size="xl" />
-            </Link>
+          <div className="lg:hidden mb-6 flex-shrink-0">
+            <Link to="/"><Logo size="xl" /></Link>
           </div>
 
           {/* Role indicator */}
-          <div className="flex items-center gap-3 p-4 bg-slate-900 border border-slate-800 rounded-xl mb-8">
-            <div className={`p-3 rounded-xl ${config.bgColor} ${config.color}`}>
-              {config.icon}
-            </div>
+          <div className="flex items-center gap-3 p-3 bg-slate-900 border border-slate-800 rounded-xl mb-6 flex-shrink-0">
+            <div className={`p-2.5 rounded-xl ${config.bgColor} ${config.color}`}>{config.icon}</div>
             <div>
-              <p className="font-semibold text-white">{config.title}</p>
-              <p className="text-sm text-slate-500">{config.subtitle}</p>
+              <p className="font-semibold text-white text-sm">{config.title}</p>
+              <p className="text-xs text-slate-500">{config.subtitle}</p>
             </div>
           </div>
 
-          <h2 className="text-2xl font-bold font-display text-white mb-2">
-            Create your account
-          </h2>
-          <p className="text-slate-400 mb-8">
-            Get started with your {currentRole} account
-          </p>
+          <h2 className="text-2xl font-bold font-display text-white mb-1 flex-shrink-0">Create your account</h2>
+          <p className="text-slate-400 mb-6 text-sm flex-shrink-0">Get started with your {currentRole} account</p>
 
-          {/* Step Indicator for Installers */}
-          {currentRole === 'installer' && (
-            <div className="mb-8">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2 flex-1">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${
-                    currentStep === 0 
-                      ? 'bg-primary-500 text-white' 
-                      : 'bg-green-500 text-white'
-                  }`}>
-                    {currentStep > 0 ? <CheckCircle2 className="w-5 h-5" /> : '1'}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-white">Basic Information</p>
-                    <p className="text-xs text-slate-500">Account details</p>
-                  </div>
-                </div>
-                
-                <div className={`h-0.5 w-12 ${currentStep > 0 ? 'bg-primary-500' : 'bg-slate-700'}`} />
-                
-                <div className="flex items-center gap-2 flex-1">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${
-                    currentStep === 1 
-                      ? 'bg-primary-500 text-white' 
-                      : 'bg-slate-700 text-slate-400'
-                  }`}>
-                    2
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-white">Certifications</p>
-                    <p className="text-xs text-slate-500">Documents & licenses</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          {renderStepIndicator()}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className={`${currentStep > 0 ? 'flex flex-col flex-1 min-h-0' : 'space-y-5'}`}>
             <AnimatePresence mode="wait">
-              {/* Step 1: Basic Information */}
+              {/* ── Step 1: Basic Information ── */}
               {currentStep === 0 && (
-                <motion.div
-                  key="step1"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  transition={{ duration: 0.3 }}
-                  className="space-y-5"
-                >
-                  <Input
-                    label="Full Name"
-                    name="fullName"
-                    type="text"
-                    placeholder="John Doe"
-                    value={formData.fullName}
-                    onChange={handleChange}
-                    leftIcon={<User className="w-4 h-4" />}
-                    required
-                  />
-
-                  <Input
-                    label="Email Address"
-                    name="email"
-                    type="email"
-                    placeholder="you@company.com"
-                    value={formData.email}
-                    onChange={handleChange}
-                    leftIcon={<Mail className="w-4 h-4" />}
-                    required
-                  />
-
-                  <Input
-                    label="Phone Number (Optional)"
-                    name="phone"
-                    type="tel"
-                    placeholder="+44 7700 900000"
-                    value={formData.phone}
-                    onChange={handleChange}
-                    leftIcon={<Phone className="w-4 h-4" />}
-                  />
-
-                  {currentRole === 'installer' && (
-                    <Input
-                      label="Company Name (Optional)"
-                      name="companyName"
-                      type="text"
-                      placeholder="Your Company Ltd"
-                      value={formData.companyName}
-                      onChange={handleChange}
-                      leftIcon={<Building2 className="w-4 h-4" />}
-                    />
+                <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.3 }} className="space-y-5">
+                  <Input label="Full Name" name="fullName" type="text" placeholder="John Doe" value={formData.fullName} onChange={handleChange} leftIcon={<User className="w-4 h-4" />} required />
+                  <Input label="Email Address" name="email" type="email" placeholder="you@company.com" value={formData.email} onChange={handleChange} leftIcon={<Mail className="w-4 h-4" />} required />
+                  <Input label="Phone Number (Optional)" name="phone" type="tel" placeholder="+44 7700 900000" value={formData.phone} onChange={handleChange} leftIcon={<Phone className="w-4 h-4" />} />
+                  {isInstaller && (
+                    <Input label="Company Name (Optional)" name="companyName" type="text" placeholder="Your Company Ltd" value={formData.companyName} onChange={handleChange} leftIcon={<Building2 className="w-4 h-4" />} />
                   )}
-
-                  <Input
-                    label="Password"
-                    name="password"
-                    type="password"
-                    placeholder="••••••••"
-                    value={formData.password}
-                    onChange={handleChange}
-                    leftIcon={<Lock className="w-4 h-4" />}
-                    required
-                  />
-
-                  <Input
-                    label="Confirm Password"
-                    name="confirmPassword"
-                    type="password"
-                    placeholder="••••••••"
-                    value={formData.confirmPassword}
-                    onChange={handleChange}
-                    leftIcon={<Lock className="w-4 h-4" />}
-                    required
-                  />
+                  <Input label="Password" name="password" type="password" placeholder="••••••••" value={formData.password} onChange={handleChange} leftIcon={<Lock className="w-4 h-4" />} required />
+                  <Input label="Confirm Password" name="confirmPassword" type="password" placeholder="••••••••" value={formData.confirmPassword} onChange={handleChange} leftIcon={<Lock className="w-4 h-4" />} required />
                 </motion.div>
               )}
 
-              {/* Step 2: Documents & Certifications (Installer only) */}
-              {currentStep === 1 && currentRole === 'installer' && (
-                <motion.div
-                  key="step2"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  transition={{ duration: 0.3 }}
-                  className="space-y-5"
-                >
-                  <div className="bg-primary-500/5 border border-primary-500/20 rounded-xl p-4 mb-6">
-                    <div className="flex gap-3">
-                      <FileText className="w-5 h-5 text-primary-400 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <h3 className="text-sm font-semibold text-white mb-1">Required Documents</h3>
-                        <p className="text-xs text-slate-400">
-                          Please upload all required certifications and licenses. All files should be in PDF, PNG, or JPG format.
-                        </p>
+              {/* ── Step 2: Documents & Certifications ── */}
+              {currentStep === 1 && isInstaller && (
+                <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.3 }} className="flex flex-col flex-1 min-h-0">
+                  <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                    <div className="flex gap-3 items-center">
+                      <div className="p-2 bg-primary-500/10 rounded-lg">
+                        <FileText className="w-4 h-4 text-primary-400" />
                       </div>
+                      <div>
+                        <h3 className="text-sm font-semibold text-white">Required Documents</h3>
+                        <p className="text-xs text-slate-400">Upload multiple files per document &mdash; OCR auto-fills dates &amp; refs</p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-400 bg-slate-800 px-3 py-1.5 rounded-full">
+                      {completedCount}/{documentSections.length} complete
                     </div>
                   </div>
 
-                  <FileUploadWithDates
-                    label="Competency Cards"
-                    name="competencyCards"
-                    value={documents.competencyCards}
-                    onChange={(data) => setDocuments({ ...documents, competencyCards: data })}
-                    required
-                  />
-
-                  <FileUpload
-                    label="Certificates of Course Completion"
-                    name="certificates"
-                    value={documents.certificates}
-                    onChange={(file) => handleDocumentChange('certificates', file)}
-                    required
-                  />
-
-                  <FileUpload
-                    label="Insurance Documents"
-                    name="insurance"
-                    value={documents.insurance}
-                    onChange={(file) => handleDocumentChange('insurance', file)}
-                    required
-                  />
-
-                  <FileUpload
-                    label="MCS Certificate"
-                    name="mcsCertificate"
-                    value={documents.mcsCertificate}
-                    onChange={(file) => handleDocumentChange('mcsCertificate', file)}
-                    required
-                  />
-
-                  <FileUpload
-                    label="Consumer Code Membership"
-                    name="consumerCode"
-                    value={documents.consumerCode}
-                    onChange={(file) => handleDocumentChange('consumerCode', file)}
-                    required
-                  />
-
-                  <FileUpload
-                    label="Insurance Backed Guarantee Provider Certificate"
-                    name="insuranceBackedGuarantee"
-                    value={documents.insuranceBackedGuarantee}
-                    onChange={(file) => handleDocumentChange('insuranceBackedGuarantee', file)}
-                    required
-                  />
-
-                  <Select
-                    label="Will Installer use external waste carrier?"
-                    value={documents.useExternalWasteCarrier}
-                    onChange={(e) => setDocuments({ ...documents, useExternalWasteCarrier: e.target.value })}
-                    options={[
-                      { value: 'yes', label: 'Yes' },
-                      { value: 'no', label: 'No' },
-                    ]}
-                    placeholder="Please select..."
-                    required
-                  />
-
-                  {documents.useExternalWasteCarrier === 'yes' && (
-                    <FileUpload
-                      label="Waste Removal License / WEEE Transfer License"
-                      name="wasteLicense"
-                      value={documents.wasteLicense}
-                      onChange={(file) => handleDocumentChange('wasteLicense', file)}
-                      required
-                    />
+                  {hasDeferredDocuments && (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="flex items-start gap-2.5 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl mb-4 flex-shrink-0">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-amber-300/90 leading-relaxed">
+                        <span className="font-semibold">Compliance notice:</span> MCS compliance documents and installation certifications cannot be generated until all required documents have been uploaded. You can upload them later from the Onboarding page.
+                      </p>
+                    </motion.div>
                   )}
+
+                  <div className="flex-1 overflow-y-auto min-h-0 space-y-2 pr-1 custom-scrollbar">
+                    {documentSections.map(renderDocumentSection)}
+
+                    {/* Consumer Code Selection */}
+                    <div className="border border-slate-700/50 bg-slate-800/30 rounded-xl px-4 py-3 space-y-2">
+                      <Select
+                        label="Consumer Code Membership"
+                        value={selectedConsumerCode}
+                        onChange={(e) => setSelectedConsumerCode(e.target.value)}
+                        options={Object.entries(CONSUMER_CODE_LABELS).map(([value, label]) => ({ value, label }))}
+                        placeholder="Select your consumer code..."
+                        required
+                      />
+                      {selectedConsumerCode && (
+                        <p className="text-xs text-green-400/80">
+                          The standard {selectedConsumerCode} consumer code leaflet will be automatically attached to your customer proposals.
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Waste Carrier */}
+                    <div className="border border-slate-700/50 bg-slate-800/30 rounded-xl px-4 py-3 space-y-3 mt-2">
+                      <Select
+                        label="Will you use an external waste carrier?"
+                        value={useExternalWasteCarrier}
+                        onChange={(e) => setUseExternalWasteCarrier(e.target.value)}
+                        options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]}
+                        placeholder="Please select..."
+                        required
+                      />
+                      {useExternalWasteCarrier === 'yes' && (
+                        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="overflow-hidden">
+                          {(() => {
+                            const wStatus = docGroups.wasteLicense.some(g => g.files.length > 0) ? 'uploaded' : deferredDocuments['wasteLicense'] ? 'deferred' : 'pending';
+                            const isWasteDeferred = deferredDocuments['wasteLicense'];
+                            return (
+                              <div className={`border rounded-xl transition-all ${wStatus === 'uploaded' ? 'border-green-500/30 bg-green-500/5' : wStatus === 'deferred' ? 'border-amber-500/30 bg-amber-500/5' : 'border-slate-700/50 bg-slate-800/30'}`}>
+                                <div className="flex items-center gap-3 px-4 py-3">
+                                  <div className="flex-shrink-0">
+                                    {wStatus === 'uploaded' ? <CheckCircle2 className="w-5 h-5 text-green-400" /> : wStatus === 'deferred' ? <Clock className="w-5 h-5 text-amber-400" /> : <Circle className="w-5 h-5 text-slate-500" />}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className={`text-sm font-medium ${wStatus === 'uploaded' ? 'text-green-300' : wStatus === 'deferred' ? 'text-amber-300' : 'text-slate-200'}`}>
+                                      Waste / WEEE Transfer License
+                                    </p>
+                                    {wStatus === 'deferred' && <p className="text-xs text-amber-400/70">Will upload later</p>}
+                                  </div>
+                                  <label className="flex items-center gap-2 text-xs cursor-pointer flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                                    <input type="checkbox" checked={!!isWasteDeferred} onChange={() => handleDeferToggle('wasteLicense')} className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-800 text-amber-500 focus:ring-amber-500/20 cursor-pointer" />
+                                    <span className="text-slate-400 whitespace-nowrap">Upload later</span>
+                                  </label>
+                                </div>
+                                {!isWasteDeferred && !docGroups.wasteLicense.some(g => g.files.length > 0) && (
+                                  <div className="px-4 pb-4 pt-1">
+                                    <MultiFileUpload
+                                      label=""
+                                      name="wasteLicense"
+                                      groups={docGroups.wasteLicense}
+                                      onChange={(g) => handleDocGroupsChange('wasteLicense', g)}
+                                      onScanFile={handleScanFile('wasteLicense')}
+                                      groupLabel="license"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </motion.div>
+                      )}
+                    </div>
+                  </div>
                 </motion.div>
               )}
+
             </AnimatePresence>
 
             {error && (
-              <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-400"
-              >
+              <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-400 flex-shrink-0 mt-4">
                 {error}
               </motion.div>
             )}
 
             {/* Action Buttons */}
-            <div className="flex gap-3 pt-2">
-              {currentStep === 1 && currentRole === 'installer' && (
-                <Button
-                  type="button"
-                  onClick={handleBack}
-                  variant="secondary"
-                  size="lg"
-                  leftIcon={<ArrowLeft className="w-4 h-4" />}
-                  className="flex-1"
-                >
+            <div className="flex gap-3 pt-4 flex-shrink-0">
+              {currentStep > 0 && isInstaller && (
+                <Button type="button" onClick={handleBack} variant="secondary" size="lg" leftIcon={<ArrowLeft className="w-4 h-4" />} className="flex-1">
                   Back
                 </Button>
               )}
 
-              {currentStep === 0 && currentRole === 'installer' ? (
+              {!isLastStep && isInstaller ? (
                 <Button
                   type="button"
                   onClick={handleNext}
-                  className="w-full"
+                  className={currentStep === 0 ? 'w-full' : 'flex-1'}
                   size="lg"
-                  disabled={!isStep1Complete()}
+                  disabled={!canProceed()}
                   rightIcon={<ArrowRight className="w-4 h-4" />}
                 >
-                  Next
+                  {currentStep === 1 ? 'Next' : 'Next'}
                 </Button>
               ) : (
                 <Button
@@ -821,57 +809,57 @@ export function SignupPage() {
                   className="flex-1"
                   size="lg"
                   isLoading={isLoading}
-                  disabled={currentRole === 'installer' && currentStep === 1 && !isStep2Complete()}
+                  disabled={isInstaller && currentStep === 1 && !isStep2Complete()}
                   rightIcon={<ArrowRight className="w-4 h-4" />}
                 >
-                  Create Account
+                  {hasDeferredDocuments ? 'Create Account (Upload Docs Later)' : 'Create Account'}
                 </Button>
               )}
             </div>
+
           </form>
 
           {/* Sign In Link */}
-          <div className="mt-6 text-center">
+          <div className="mt-4 text-center flex-shrink-0">
             <p className="text-sm text-slate-400">
               Already have an account?{' '}
-              <Link
-                to={`/login/${currentRole}`}
-                className="text-primary-400 hover:text-primary-300 font-semibold transition-colors"
-              >
+              <Link to={`/login/${currentRole}`} className="text-primary-400 hover:text-primary-300 font-semibold transition-colors">
                 Sign In
               </Link>
             </p>
           </div>
 
-          {/* Portal switcher */}
-          <div className="mt-8 pt-6 border-t border-slate-800">
-            <p className="text-sm text-slate-500 text-center mb-4">Switch portal</p>
-            <div className="flex justify-center gap-3">
-              {Object.entries(roleConfig)
-                .filter(([key]) => key !== 'admin') // Hide admin from portal switcher
-                .map(([key, value]) => (
-                <Link
-                  key={key}
-                  to={`/signup/${key}`}
-                  className={`p-3 rounded-xl border transition-all ${
-                    key === currentRole
-                      ? 'border-primary-500 bg-primary-500/10 text-primary-400'
-                      : 'border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800/50'
-                  }`}
-                  title={value.title}
-                >
-                  {value.icon}
+          {/* Portal switcher + back to home (step 1 only) */}
+          {currentStep === 0 && (
+            <>
+              <div className="mt-6 pt-4 border-t border-slate-800 flex-shrink-0">
+                <p className="text-sm text-slate-500 text-center mb-4">Switch portal</p>
+                <div className="flex justify-center gap-3">
+                  {Object.entries(roleConfig)
+                    .filter(([key]) => key !== 'admin')
+                    .map(([key, value]) => (
+                      <Link
+                        key={key}
+                        to={`/signup/${key}`}
+                        className={`p-3 rounded-xl border transition-all ${
+                          key === currentRole
+                            ? 'border-primary-500 bg-primary-500/10 text-primary-400'
+                            : 'border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800/50'
+                        }`}
+                        title={value.title}
+                      >
+                        {value.icon}
+                      </Link>
+                    ))}
+                </div>
+              </div>
+              <div className="mt-6 text-center flex-shrink-0">
+                <Link to="/" className="text-sm text-slate-500 hover:text-slate-300 transition-colors">
+                  &larr; Back to home
                 </Link>
-              ))}
-            </div>
-          </div>
-
-          {/* Back to home */}
-          <div className="mt-8 text-center">
-            <Link to="/" className="text-sm text-slate-500 hover:text-slate-300 transition-colors">
-              ← Back to home
-            </Link>
-          </div>
+              </div>
+            </>
+          )}
         </div>
       </motion.div>
     </div>

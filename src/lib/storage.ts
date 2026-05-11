@@ -181,3 +181,53 @@ export async function deleteDocument(filePath: string): Promise<void> {
   }
 }
 
+/**
+ * Upload multiple files for a document group and save metadata for each.
+ * Shares the same issued/expiry dates and reference across all files in the group.
+ */
+export async function uploadDocumentGroup(
+  files: File[],
+  userId: string,
+  documentType: string,
+  issuedDate?: string,
+  expiryDate?: string,
+  companyId?: string
+): Promise<void> {
+  for (const file of files) {
+    const version = await getNextDocumentVersion(userId, documentType);
+    const filePath = await uploadDocument(file, userId, documentType, version, companyId);
+    await saveDocumentMetadata(
+      userId, documentType, file.name, filePath, file.size, version,
+      issuedDate, expiryDate, companyId
+    );
+  }
+}
+
+/**
+ * Upload a file for a Nominated Technical Person (ID or qualification card)
+ * and return the public URL.
+ */
+export async function uploadNTPDocument(
+  file: File,
+  companyId: string,
+  ntpId: string,
+  docType: 'id_document' | 'qualification_card'
+): Promise<string> {
+  const fileExt = file.name.split('.').pop();
+  const fileName = `ntp/${companyId}/${ntpId}/${docType}_${Date.now()}.${fileExt}`;
+
+  const { data, error } = await supabase.storage
+    .from(STORAGE_BUCKET)
+    .upload(fileName, file, { cacheControl: '3600', upsert: true });
+
+  if (error) {
+    throw new Error(`Failed to upload NTP ${docType}: ${error.message}`);
+  }
+
+  const { data: { publicUrl } } = supabase.storage
+    .from(STORAGE_BUCKET)
+    .getPublicUrl(data.path);
+
+  return publicUrl;
+}
+

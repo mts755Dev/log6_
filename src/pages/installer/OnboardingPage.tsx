@@ -9,7 +9,6 @@ import {
   AlertTriangle,
   Calendar,
   Eye,
-  Trash2,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
@@ -19,7 +18,14 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { format } from 'date-fns';
-import type { InstallerOnboardingDoc, OnboardingDocumentType, OnboardingDocumentStatus } from '../../types';
+import { Select } from '../../components/ui/Select';
+import type {
+  InstallerOnboardingDoc,
+  OnboardingDocumentType,
+  OnboardingDocumentStatus,
+  ConsumerCode,
+} from '../../types';
+import { CONSUMER_CODE_LABELS } from '../../types';
 
 const REQUIRED_DOCUMENTS: Array<{
   type: OnboardingDocumentType;
@@ -27,54 +33,13 @@ const REQUIRED_DOCUMENTS: Array<{
   description: string;
   required: boolean;
 }> = [
-  {
-    type: 'competency_cards',
-    label: 'Competency Cards',
-    description: 'Relevant competency cards for installation work',
-    required: true,
-  },
-  {
-    type: 'course_certificates',
-    label: 'Course Completion Certificates',
-    description: 'Training and certification records',
-    required: true,
-  },
-  {
-    type: 'insurance',
-    label: 'Insurance Documents',
-    description: 'Public liability and professional indemnity insurance',
-    required: true,
-  },
-  {
-    type: 'mcs_certificate',
-    label: 'MCS Certificate',
-    description: 'Microgeneration Certification Scheme certificate',
-    required: true,
-  },
-  {
-    type: 'consumer_code_membership',
-    label: 'Consumer Code Membership',
-    description: 'Consumer code membership certificate',
-    required: true,
-  },
-  {
-    type: 'ibg_certificate',
-    label: 'Insurance Backed Guarantee Certificate',
-    description: 'IBG provider certificate',
-    required: true,
-  },
-  {
-    type: 'waste_carrier_license',
-    label: 'Waste Carrier License',
-    description: 'Waste removal license (if applicable)',
-    required: false,
-  },
-  {
-    type: 'weee_license',
-    label: 'WEEE Transfer License',
-    description: 'WEEE transfer license (if applicable)',
-    required: false,
-  },
+  { type: 'competency_cards', label: 'Competency Cards', description: 'Relevant competency cards for installation work', required: true },
+  { type: 'course_certificates', label: 'Course Completion Certificates', description: 'Training and certification records', required: true },
+  { type: 'insurance', label: 'Insurance Documents', description: 'Public liability and professional indemnity insurance', required: true },
+  { type: 'mcs_certificate', label: 'MCS Certificate', description: 'Microgeneration Certification Scheme certificate', required: true },
+  { type: 'ibg_certificate', label: 'Insurance Backed Guarantee Certificate', description: 'IBG provider certificate', required: true },
+  { type: 'waste_carrier_license', label: 'Waste Carrier License', description: 'Waste removal license (if applicable)', required: false },
+  { type: 'weee_license', label: 'WEEE Transfer License', description: 'WEEE transfer license (if applicable)', required: false },
 ];
 
 export function OnboardingPage() {
@@ -88,14 +53,16 @@ export function OnboardingPage() {
     type: OnboardingDocumentType;
     label: string;
   } | null>(null);
+  const [consumerCode, setConsumerCode] = useState<string>('');
+  const [savingConsumerCode, setSavingConsumerCode] = useState(false);
 
   useEffect(() => {
     if (user?.companyId) {
       fetchDocuments();
+      fetchConsumerCode();
     }
   }, [user]);
 
-  // Recalculate progress whenever documents change
   useEffect(() => {
     if (user?.companyId && documents.length > 0) {
       calculateProgress();
@@ -104,7 +71,6 @@ export function OnboardingPage() {
 
   const fetchDocuments = async () => {
     if (!user?.companyId) return;
-
     try {
       setIsLoading(true);
       const { data, error } = await supabase
@@ -115,17 +81,46 @@ export function OnboardingPage() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-
-      const mappedDocs = (data || []).map(mapDocument);
-      setDocuments(mappedDocs);
-      
-      // Recalculate progress after fetching documents
+      setDocuments((data || []).map(mapDocument));
       await calculateProgress();
     } catch (error: any) {
       console.error('Error fetching documents:', error);
       toast.error('Failed to load documents');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchConsumerCode = async () => {
+    if (!user?.companyId) return;
+    try {
+      const { data } = await supabase
+        .from('companies')
+        .select('consumer_code')
+        .eq('id', user.companyId)
+        .single();
+      if (data?.consumer_code) setConsumerCode(data.consumer_code);
+    } catch (error) {
+      console.error('Error fetching consumer code:', error);
+    }
+  };
+
+  const handleConsumerCodeChange = async (value: string) => {
+    if (!user?.companyId) return;
+    setConsumerCode(value);
+    setSavingConsumerCode(true);
+    try {
+      const { error } = await supabase
+        .from('companies')
+        .update({ consumer_code: value || null })
+        .eq('id', user.companyId);
+      if (error) throw error;
+      toast.success('Consumer code updated');
+    } catch (error: any) {
+      console.error('Error saving consumer code:', error);
+      toast.error('Failed to update consumer code');
+    } finally {
+      setSavingConsumerCode(false);
     }
   };
 
@@ -154,35 +149,21 @@ export function OnboardingPage() {
   });
 
   const calculateProgress = async () => {
-    if (!user?.companyId) {
-      console.log('❌ No company ID, cannot calculate progress');
-      return;
-    }
-
+    if (!user?.companyId) return;
     try {
-      console.log('🔄 Calculating progress for company:', user.companyId);
-      
       const { data, error } = await supabase
         .rpc('get_onboarding_progress', { p_company_id: user.companyId });
-
       if (error) {
-        console.error('❌ Error from RPC:', error);
         toast.error('Failed to calculate progress');
         return;
       }
-
       if (data && Array.isArray(data) && data.length > 0) {
-        const progressData = data[0];
-        const percentage = progressData.completion_percentage || 0;
-        console.log('✅ Progress calculated:', percentage + '%');
-        console.log('📊 Details:', progressData);
-        setProgress(percentage);
+        setProgress(data[0].completion_percentage || 0);
       } else {
-        console.log('⚠️ RPC returned no data');
         setProgress(0);
       }
     } catch (error) {
-      console.error('❌ Error calculating progress:', error);
+      console.error('Error calculating progress:', error);
     }
   };
 
@@ -194,49 +175,32 @@ export function OnboardingPage() {
   const handleFileUpload = async (
     type: OnboardingDocumentType,
     file: File,
-    metadata: {
-      issuedDate?: string;
-      expiryDate?: string;
-      referenceNumber?: string;
-      providerName?: string;
-    }
+    metadata: { issuedDate?: string; expiryDate?: string; referenceNumber?: string; providerName?: string }
   ) => {
     if (!user?.companyId) return;
-
     try {
-      // Upload to Supabase Storage
       const fileExt = file.name.split('.').pop();
       const fileName = `onboarding/${user.companyId}/${type}/${Date.now()}.${fileExt}`;
-      
-      const { error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(fileName, file);
 
+      const { error: uploadError } = await supabase.storage.from('documents').upload(fileName, file);
       if (uploadError) throw uploadError;
 
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('documents')
-        .getPublicUrl(fileName);
+      const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(fileName);
 
-      // Save to database
-      const { error: dbError } = await supabase
-        .from('installer_onboarding_docs')
-        .insert({
-          company_id: user.companyId,
-          uploaded_by: user.id,
-          document_type: type,
-          file_name: file.name,
-          file_url: publicUrl,
-          file_size: file.size,
-          mime_type: file.type,
-          issued_date: metadata.issuedDate || null,
-          expiry_date: metadata.expiryDate || null,
-          reference_number: metadata.referenceNumber || null,
-          provider_name: metadata.providerName || null,
-          status: 'pending',
-        });
-
+      const { error: dbError } = await supabase.from('installer_onboarding_docs').insert({
+        company_id: user.companyId,
+        uploaded_by: user.id,
+        document_type: type,
+        file_name: file.name,
+        file_url: publicUrl,
+        file_size: file.size,
+        mime_type: file.type,
+        issued_date: metadata.issuedDate || null,
+        expiry_date: metadata.expiryDate || null,
+        reference_number: metadata.referenceNumber || null,
+        provider_name: metadata.providerName || null,
+        status: 'pending',
+      });
       if (dbError) throw dbError;
 
       toast.success('Document uploaded successfully!');
@@ -254,7 +218,7 @@ export function OnboardingPage() {
   };
 
   const getStatusColor = (status: OnboardingDocumentStatus) => {
-    const colors = {
+    const colors: Record<OnboardingDocumentStatus, string> = {
       pending: 'bg-yellow-500/20 text-yellow-400',
       approved: 'bg-green-500/20 text-green-400',
       rejected: 'bg-red-500/20 text-red-400',
@@ -265,7 +229,7 @@ export function OnboardingPage() {
   };
 
   const getStatusIcon = (status: OnboardingDocumentStatus) => {
-    const icons = {
+    const icons: Record<OnboardingDocumentStatus, React.ReactNode> = {
       pending: <Clock className="w-4 h-4" />,
       approved: <CheckCircle className="w-4 h-4" />,
       rejected: <XCircle className="w-4 h-4" />,
@@ -288,20 +252,16 @@ export function OnboardingPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
         <h1 className="page-title">Company Onboarding</h1>
         <p className="page-subtitle">Upload required documents for verification</p>
       </div>
 
-      {/* Progress */}
       <Card>
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-xl font-bold text-white">Onboarding Progress</h2>
-            <p className="text-sm text-slate-400">
-              {progress}% complete
-            </p>
+            <p className="text-sm text-slate-400">{progress}% complete</p>
           </div>
           <div className="text-right">
             <Badge className={progress === 100 ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}>
@@ -311,24 +271,50 @@ export function OnboardingPage() {
           </div>
         </div>
         <div className="w-full bg-slate-800 rounded-full h-4">
-          <div
-            className="bg-primary-500 h-4 rounded-full transition-all duration-500"
-            style={{ width: `${progress}%` }}
-          />
+          <div className="bg-primary-500 h-4 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
         </div>
       </Card>
 
-      {/* Documents */}
+      {/* Consumer Code Selection */}
+      <Card>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-3 mb-2">
+              <FileText className="w-5 h-5 text-blue-400" />
+              <h3 className="text-lg font-semibold text-white">Consumer Code Membership</h3>
+            </div>
+            <p className="text-sm text-slate-400 mb-3">
+              Select your consumer code. The standard leaflet will be automatically attached to customer proposals.
+            </p>
+            <div className="max-w-sm">
+              <Select
+                label=""
+                value={consumerCode}
+                onChange={(e) => handleConsumerCodeChange(e.target.value)}
+                options={Object.entries(CONSUMER_CODE_LABELS).map(([value, label]) => ({ value, label }))}
+                placeholder="Select your consumer code..."
+              />
+            </div>
+            {consumerCode && (
+              <p className="text-xs text-green-400/80 mt-2">
+                The standard {consumerCode} consumer code leaflet will be included with your proposals.
+              </p>
+            )}
+          </div>
+          {consumerCode && (
+            <Badge className="bg-green-500/20 text-green-400">
+              <CheckCircle className="w-4 h-4 mr-1" />
+              {consumerCode}
+            </Badge>
+          )}
+        </div>
+      </Card>
+
       <div className="grid grid-cols-1 gap-6">
         {REQUIRED_DOCUMENTS.map((docType) => {
           const existingDoc = getDocumentForType(docType.type);
-
           return (
-            <motion.div
-              key={docType.type}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
+            <motion.div key={docType.type} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
               <Card className={existingDoc?.status === 'approved' ? 'border-green-500/50' : ''}>
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex-1">
@@ -372,32 +358,17 @@ export function OnboardingPage() {
                   <div className="flex gap-2">
                     {existingDoc ? (
                       <>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          leftIcon={<Eye className="w-4 h-4" />}
-                          onClick={() => window.open(existingDoc.fileUrl, '_blank')}
-                        >
+                        <Button variant="secondary" size="sm" leftIcon={<Eye className="w-4 h-4" />} onClick={() => window.open(existingDoc.fileUrl, '_blank')}>
                           View
                         </Button>
                         {existingDoc.status !== 'approved' && (
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            leftIcon={<Upload className="w-4 h-4" />}
-                            onClick={() => openUploadModal(docType.type, docType.label)}
-                          >
+                          <Button variant="primary" size="sm" leftIcon={<Upload className="w-4 h-4" />} onClick={() => openUploadModal(docType.type, docType.label)}>
                             Re-upload
                           </Button>
                         )}
                       </>
                     ) : (
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        leftIcon={<Upload className="w-4 h-4" />}
-                        onClick={() => openUploadModal(docType.type, docType.label)}
-                      >
+                      <Button variant="primary" size="sm" leftIcon={<Upload className="w-4 h-4" />} onClick={() => openUploadModal(docType.type, docType.label)}>
                         Upload
                       </Button>
                     )}
@@ -409,7 +380,6 @@ export function OnboardingPage() {
         })}
       </div>
 
-      {/* Upload Modal */}
       {currentUploadType && (
         <DocumentUploadModal
           isOpen={isUploadModalOpen}
