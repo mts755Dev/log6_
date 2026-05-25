@@ -17,6 +17,13 @@ serve(async (req) => {
   }
 
   try {
+    if (!RESEND_API_KEY) {
+      return new Response(
+        JSON.stringify({ error: "RESEND_API_KEY is not configured" }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const {
       to,
       recipientName,

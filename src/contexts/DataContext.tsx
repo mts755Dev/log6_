@@ -185,7 +185,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           paymentModel: c.payment_model, // Can be null for trial accounts
           creditBalance: c.credit_balance || 0,
           creditPrice: parseFloat(c.credit_price) || 3.00,
-          subscriptionTier: c.subscription_tier,
+          subscriptionTier: c.subscription_tier || 'starter',
           subscriptionStatus: c.subscription_status,
           subscriptionEndDate: c.subscription_end_date,
           monthlyProposalLimit: c.monthly_proposal_limit,
@@ -817,43 +817,25 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Deduct credit or increment proposal counter
+  // Deduct 1 credit (trial / pay-as-you-go) or increment subscription proposal usage.
   const deductQuoteCredit = useCallback(async (companyId: string) => {
-    try {
-      const { data: company, error: fetchError } = await supabase
-        .from('companies')
-        .select('payment_model, credit_balance, proposals_used_this_month, subscription_status')
-        .eq('id', companyId)
-        .single();
+    const { data, error } = await supabase.rpc('deduct_proposal_credit', {
+      p_company_id: companyId,
+    });
 
-      if (fetchError || !company) {
-        throw new Error('Company not found');
-      }
-
-      // For trial accounts or pay-as-you-go, deduct credits
-      if (company.subscription_status === 'trial' || company.payment_model === 'pay-as-you-go') {
-        // Deduct 1 credit
-        const { error: updateError } = await supabase
-          .from('companies')
-          .update({ credit_balance: company.credit_balance - 1 })
-          .eq('id', companyId);
-
-        if (updateError) throw updateError;
-      } else if (company.payment_model === 'subscription') {
-        // Increment proposal counter for subscription users
-        const { error: updateError } = await supabase
-          .from('companies')
-          .update({ proposals_used_this_month: company.proposals_used_this_month + 1 })
-          .eq('id', companyId);
-
-        if (updateError) throw updateError;
-      }
-
-      await loadData(); // Refresh company data
-    } catch (error) {
+    if (error) {
       console.error('Error deducting quote credit:', error);
-      throw error;
+      throw new Error(error.message || 'Failed to deduct credit');
     }
+
+    const result = data as { success?: boolean; error?: string } | null;
+    if (!result?.success) {
+      const message = result?.error || 'Failed to deduct credit';
+      console.error('deduct_proposal_credit failed:', message);
+      throw new Error(message);
+    }
+
+    await loadData();
   }, [loadData]);
 
   return (

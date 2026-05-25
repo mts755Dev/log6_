@@ -27,6 +27,23 @@ export interface QuoteEmailData {
   companyPhone: string;
 }
 
+/** Opens the installer's default email app with a pre-filled quote message. */
+export function openQuoteInEmailClient(data: QuoteEmailData): void {
+  const subject = encodeURIComponent(
+    `Your Quote from ${data.companyName} - ${data.quote.reference}`,
+  );
+  const body = encodeURIComponent(
+    `Hi ${data.recipient.name},\n\n` +
+      `Thank you for your interest in battery storage. We've prepared a personalized proposal for you.\n\n` +
+      `Quote Reference: ${data.quote.reference}\n` +
+      `Total Investment: £${data.quote.total.toLocaleString()}\n` +
+      `Estimated Annual Savings: £${data.quote.annualSavings.toLocaleString()}\n\n` +
+      `View your quote here:\n${data.shareLink}\n\n` +
+      `Best regards,\n${data.companyName}`,
+  );
+  window.location.href = `mailto:${data.recipient.email}?subject=${subject}&body=${body}`;
+}
+
 /**
  * Send quote notification to customer
  * 
@@ -38,6 +55,7 @@ export interface QuoteEmailData {
 export async function sendQuoteToCustomer(data: QuoteEmailData): Promise<{
   success: boolean;
   message: string;
+  useEmailClientFallback?: boolean;
 }> {
   try {
     console.log('📧 Attempting to send email to:', data.recipient.email);
@@ -59,14 +77,18 @@ export async function sendQuoteToCustomer(data: QuoteEmailData): Promise<{
 
     if (error) {
       console.error('Supabase function error:', error);
-      // If it's a 403/404, the function doesn't exist - provide helpful feedback
-      if (error.message.includes('403') || error.message.includes('404') || error.message.includes('non-2xx')) {
-        return {
-          success: false,
-          message: 'Email service not configured. Please use WhatsApp or copy the link manually.',
-        };
-      }
-      throw new Error(error.message || 'Failed to send email');
+      const isUnconfigured =
+        error.message.includes('403') ||
+        error.message.includes('404') ||
+        error.message.includes('503') ||
+        error.message.includes('non-2xx');
+      return {
+        success: false,
+        useEmailClientFallback: isUnconfigured,
+        message: isUnconfigured
+          ? 'Automated email is not configured on the server.'
+          : error.message || 'Failed to send email',
+      };
     }
 
     return {
@@ -77,7 +99,8 @@ export async function sendQuoteToCustomer(data: QuoteEmailData): Promise<{
     console.error('Error sending email:', error);
     return {
       success: false,
-      message: 'Email service not available. Use WhatsApp or copy the link to send manually.',
+      useEmailClientFallback: true,
+      message: 'Automated email is not available.',
     };
   }
 }

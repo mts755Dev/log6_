@@ -40,7 +40,7 @@ import { useData } from '../../contexts/DataContext';
 import { useToast } from '../../contexts/ToastContext';
 import { supabase } from '../../lib/supabase';
 import { generateAllProposalPdfs } from '../../services/proposalPdfGenerator';
-import { sendQuoteToCustomer } from '../../services/emailNotifications';
+import { sendQuoteToCustomer, openQuoteInEmailClient } from '../../services/emailNotifications';
 import type { Quote, QuoteLineItem, ROIProjection, CustomerInfo, TariffInfo } from '../../types';
 import { format } from 'date-fns';
 
@@ -273,16 +273,51 @@ export function NewQuotePage() {
     window.open(getShareLink(), '_blank');
   };
 
-  const handleShareWhatsApp = () => {
+  const markQuoteSentAndDeductCredit = async () => {
+    if (!quoteForShare || !user?.companyId || quoteForShare.status !== 'draft') return;
+
+    const eligibility = await canCreateQuote(user.companyId);
+    if (!eligibility.canCreate) {
+      toast.error(eligibility.reason || 'Unable to send quote');
+      throw new Error(eligibility.reason || 'Unable to send quote');
+    }
+
+    const sentAt = new Date().toISOString();
+    const { error: updateError } = await supabase
+      .from('quotes')
+      .update({
+        status: 'sent',
+        sent_at: sentAt,
+      })
+      .eq('id', quoteForShare.id);
+
+    if (updateError) throw updateError;
+
+    await deductQuoteCredit(user.companyId);
+    setQuoteForShare({ ...quoteForShare, status: 'sent', sentAt });
+  };
+
+  const handleShareWhatsApp = async () => {
     if (!quoteForShare || !shareToken) return;
-    
-    const link = getShareLink();
-    const customerPhone = customer.phone.replace(/\s+/g, '');
-    const company = user?.companyId ? getCompany(user.companyId) : null;
-    const message = `Hi ${customer.name}, here is your solar quote from ${company?.name || 'our team'}: ${link}`;
-    const whatsappUrl = `https://wa.me/${customerPhone}?text=${encodeURIComponent(message)}`;
-    
-    window.open(whatsappUrl, '_blank');
+
+    try {
+      if (quoteForShare.status === 'draft') {
+        await markQuoteSentAndDeductCredit();
+        toast.success('Quote sent — 1 credit used.');
+      }
+
+      const link = getShareLink();
+      const customerPhone = customer.phone.replace(/\s+/g, '');
+      const company = user?.companyId ? getCompany(user.companyId) : null;
+      const message = `Hi ${customer.name}, here is your solar quote from ${company?.name || 'our team'}: ${link}`;
+      const whatsappUrl = `https://wa.me/${customerPhone}?text=${encodeURIComponent(message)}`;
+
+      window.open(whatsappUrl, '_blank');
+    } catch (error: unknown) {
+      console.error('Error sharing quote on WhatsApp:', error);
+      const message = error instanceof Error ? error.message : 'Failed to send quote';
+      toast.error(message);
+    }
   };
 
   const handleSendEmail = async () => {
@@ -290,7 +325,12 @@ export function NewQuotePage() {
     
     setIsSendingEmail(true);
     try {
-      const result = await sendQuoteToCustomer({
+      if (quoteForShare.status === 'draft') {
+        await markQuoteSentAndDeductCredit();
+        toast.success('Quote sent — 1 credit used.');
+      }
+
+      const emailPayload = {
         quote: quoteForShare,
         recipient: {
           email: customer.email,
@@ -299,17 +339,21 @@ export function NewQuotePage() {
         shareLink: getShareLink(),
         companyName: (user.companyId ? getCompany(user.companyId)?.name : '') || 'Your Company',
         companyEmail: user.email || '',
-        companyPhone: '+44 782346382', // Placeholder if not in user object
-      });
+        companyPhone: '+44 782346382',
+      };
+
+      const result = await sendQuoteToCustomer(emailPayload);
 
       if (result.success) {
         toast.success('Email sent successfully to customer!');
       } else {
-        toast.error(result.message || 'Failed to send email');
+        openQuoteInEmailClient(emailPayload);
+        toast.info('Opening your email app — send the message from there.');
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error in handleSendEmail:', error);
-      toast.error('An unexpected error occurred');
+      const message = error instanceof Error ? error.message : 'Failed to send quote';
+      toast.error(message);
     } finally {
       setIsSendingEmail(false);
     }
@@ -356,6 +400,8 @@ export function NewQuotePage() {
       }
 
       let quoteToUse: Quote;
+      const previousStatus =
+        isEditMode && id ? (getQuote(id)?.status ?? 'draft') : 'draft';
 
       if (isEditMode && id) {
         // Update existing quote
@@ -414,6 +460,10 @@ export function NewQuotePage() {
       }
 
       setQuoteForShare(quoteToUse);
+
+      if (status === 'sent' && previousStatus === 'draft') {
+        await deductQuoteCredit(user.companyId);
+      }
 
       try {
         // 🎯 STEP 1: Generate share token
@@ -476,10 +526,6 @@ export function NewQuotePage() {
           console.log('✅ Document Bank files attached');
         }
 
-        if (status === 'sent') {
-          await deductQuoteCredit(user.companyId);
-        }
-        
         setShowGeneratingModal(false);
         setShowShareModal(true);
         const totalDocs = pdfResult.generatedPdfs.length + (attachError ? 0 : 2);

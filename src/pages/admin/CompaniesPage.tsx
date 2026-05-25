@@ -26,6 +26,11 @@ import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { format } from 'date-fns';
 import type { Company } from '../../types';
 
+function formatSubscriptionTierLabel(tier?: string | null): string {
+  const value = tier || 'starter';
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 export function CompaniesPage() {
   const toast = useToast();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -84,7 +89,7 @@ export function CompaniesPage() {
         paymentModel: company.payment_model || 'subscription',
         creditBalance: company.credit_balance || 0,
         creditPrice: parseFloat(company.credit_price) || 3.00,
-        subscriptionTier: company.subscription_tier,
+        subscriptionTier: company.subscription_tier || 'starter',
         subscriptionStatus: company.subscription_status,
         subscriptionEndDate: company.subscription_end_date,
         monthlyProposalLimit: company.monthly_proposal_limit,
@@ -424,7 +429,7 @@ export function CompaniesPage() {
                     {company.paymentModel === 'pay-as-you-go' ? 'Pay as you go' : 'Subscription'}
                   </Badge>
                   <SubscriptionBadge status={company.subscriptionStatus} />
-                  <Badge variant="slate">{company.subscriptionTier}</Badge>
+                  <Badge variant="slate">{formatSubscriptionTierLabel(company.subscriptionTier)}</Badge>
                   {company.isUmbrellaScheme && (
                     <Badge variant="primary">Umbrella</Badge>
                   )}

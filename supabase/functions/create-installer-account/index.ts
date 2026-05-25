@@ -122,7 +122,7 @@ serve(async (req) => {
         payment_model: null,
         credit_balance: 5,
         credit_price: 3.0,
-        subscription_tier: null,
+        subscription_tier: 'starter',
         subscription_status: 'trial',
         subscription_end_date: trialEnd,
         monthly_proposal_limit: null,

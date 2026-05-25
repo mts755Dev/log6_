@@ -36,7 +36,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { generateQuotePDF } from '../../services/pdfGenerator';
 import { generateAllProposalPdfs } from '../../services/proposalPdfGenerator';
-import { sendQuoteToCustomer } from '../../services/emailNotifications';
+import { sendQuoteToCustomer, openQuoteInEmailClient } from '../../services/emailNotifications';
 import { format } from 'date-fns';
 import { supabase } from '../../lib/supabase';
 import type { Quote } from '../../types';
@@ -269,24 +269,42 @@ export function QuoteDetailPage() {
     window.open(getShareLink(), '_blank');
   };
 
+  const markQuoteSentAndDeductCredit = async () => {
+    if (!quote || !user?.companyId || quote.status !== 'draft') return;
+
+    const eligibility = await canCreateQuote(user.companyId);
+    if (!eligibility.canCreate) {
+      toast.error(eligibility.reason || 'Unable to send quote');
+      throw new Error(eligibility.reason || 'Unable to send quote');
+    }
+
+    const { error: updateError } = await supabase
+      .from('quotes')
+      .update({
+        status: 'sent',
+        sent_at: new Date().toISOString(),
+      })
+      .eq('id', quote.id);
+
+    if (updateError) throw updateError;
+
+    await deductQuoteCredit(user.companyId);
+    await fetchFreshQuote();
+    await refreshData();
+  };
+
   const handleShareWhatsApp = async () => {
     if (!quote || !shareToken) return;
     
-    // Update quote status to 'sent' if it's still a draft
     if (quote.status === 'draft') {
       try {
-        await supabase
-          .from('quotes')
-          .update({
-            status: 'sent',
-            sent_at: new Date().toISOString(),
-          })
-          .eq('id', quote.id);
-        
-        // Refresh quote data
-        await fetchFreshQuote();
-      } catch (error) {
-        console.error('Error updating quote status:', error);
+        await markQuoteSentAndDeductCredit();
+        toast.success('Quote sent — 1 credit used.');
+      } catch (error: unknown) {
+        console.error('Error sending quote:', error);
+        const message = error instanceof Error ? error.message : 'Failed to send quote';
+        toast.error(message);
+        return;
       }
     }
     
@@ -296,7 +314,6 @@ export function QuoteDetailPage() {
     const whatsappUrl = `https://wa.me/${customerPhone}?text=${encodeURIComponent(message)}`;
     
     window.open(whatsappUrl, '_blank');
-    toast.success('Quote marked as sent!');
   };
 
   const handleSendEmail = async () => {
@@ -304,22 +321,12 @@ export function QuoteDetailPage() {
     
     setIsSendingEmail(true);
     try {
-      // Update quote status to 'sent' if it's still a draft
       if (quote.status === 'draft') {
-        await supabase
-          .from('quotes')
-          .update({
-            status: 'sent',
-            sent_at: new Date().toISOString(),
-          })
-          .eq('id', quote.id);
-        
-        // Refresh quote data
-        await fetchFreshQuote();
-        toast.success('Quote marked as sent!');
+        await markQuoteSentAndDeductCredit();
+        toast.success('Quote sent — 1 credit used.');
       }
       
-      const result = await sendQuoteToCustomer({
+      const emailPayload = {
         quote: quote,
         recipient: {
           email: quote.customer.email,
@@ -329,30 +336,20 @@ export function QuoteDetailPage() {
         companyName: resolvedCompanyName || 'Your Company',
         companyEmail: user.email || '',
         companyPhone: '+44 782346382',
-      });
+      };
+
+      const result = await sendQuoteToCustomer(emailPayload);
 
       if (result.success) {
         toast.success('Email sent successfully to customer!');
       } else {
-        // If email service fails, open default email client as fallback
-        const subject = encodeURIComponent(`Your Quote from ${resolvedCompanyName || 'us'} - ${quote.reference}`);
-        const body = encodeURIComponent(
-          `Hi ${quote.customer.name},\n\n` +
-          `Thank you for your interest in battery storage. We've prepared a personalized proposal for you.\n\n` +
-          `Quote Reference: ${quote.reference}\n` +
-          `Total Investment: £${quote.total.toLocaleString()}\n` +
-          `Estimated Annual Savings: £${quote.annualSavings.toLocaleString()}\n\n` +
-          `View your quote here:\n${getShareLink()}\n\n` +
-          `Best regards,\n${resolvedCompanyName || 'Your Company'}`
-        );
-        const mailtoLink = `mailto:${quote.customer.email}?subject=${subject}&body=${body}`;
-        window.location.href = mailtoLink;
-        
-        toast.info('Opening your email client...');
+        openQuoteInEmailClient(emailPayload);
+        toast.info('Opening your email app — send the message from there.');
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error in handleSendEmail:', error);
-      toast.error('An unexpected error occurred');
+      const message = error instanceof Error ? error.message : 'Failed to send quote';
+      toast.error(message);
     } finally {
       setIsSendingEmail(false);
     }

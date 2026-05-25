@@ -145,8 +145,12 @@ export function QuotesListPage() {
         share_token: shareToken
       });
 
-      // 🎯 STEP 6: Deduct credit
-      await deductQuoteCredit(user.companyId);
+      // 🎯 STEP 6: Deduct credit (draft → sent only)
+      if (quote.status === 'draft') {
+        await deductQuoteCredit(user.companyId);
+      }
+
+      await refreshData();
 
       const totalDocs = pdfResult.generatedPdfs.length + (attachError ? 0 : 2);
       toast.success(`🎉 Quote sent with ${totalDocs} documents in proposal pack!`);
