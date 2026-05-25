@@ -39,11 +39,6 @@ import { EngineersPage } from './pages/installer/EngineersPage';
 import { OnboardingPage } from './pages/installer/OnboardingPage';
 import { InstallationSchedulerPage } from './pages/installer/InstallationSchedulerPage';
 
-// Assessor Pages
-import { AssessorDashboard } from './pages/assessor/AssessorDashboard';
-import { PendingPage } from './pages/assessor/PendingPage';
-import { ReviewPage } from './pages/assessor/ReviewPage';
-
 // Compliance Pages
 import { ComplianceDashboard } from './pages/compliance/ComplianceDashboard';
 import { InstallationReviewPage } from './pages/compliance/InstallationReviewPage';
@@ -105,16 +100,8 @@ function App() {
               <Route path="settings" element={<SettingsPage />} />
             </Route>
 
-            {/* Assessor Routes */}
-            <Route path="/assessor" element={<DashboardLayout requiredRole="assessor" />}>
-              <Route index element={<AssessorDashboard />} />
-              <Route path="pending" element={<PendingPage />} />
-              <Route path="review/:id" element={<ReviewPage />} />
-              <Route path="approved" element={<PlaceholderPage />} />
-              <Route path="rejected" element={<PlaceholderPage />} />
-              <Route path="certificates" element={<PlaceholderPage />} />
-              <Route path="settings" element={<PlaceholderPage />} />
-            </Route>
+            {/* Assessor portal removed — redirect legacy URLs to installer */}
+            <Route path="/assessor/*" element={<Navigate to="/installer" replace />} />
 
             {/* Compliance Officer Routes */}
             <Route path="/compliance" element={<DashboardLayout requiredRole="compliance_officer" />}>

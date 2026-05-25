@@ -136,17 +136,9 @@ const portalCards = [
     role: 'installer',
     title: 'Installer Portal',
     description: 'Create quotes, manage proposals, and track your installations from lead to commissioning.',
-    icon: <Wrench className="w-7 h-7" />,
+    icon: <Users className="w-7 h-7" />,
     color: 'from-energy-500 to-energy-600',
     features: ['Instant quoting', 'ROI calculator', 'PDF proposals', 'Order tracking'],
-  },
-  {
-    role: 'assessor',
-    title: 'Assessor Portal',
-    description: 'Review umbrella scheme submissions, verify installations, and issue certificates.',
-    icon: <ClipboardCheck className="w-7 h-7" />,
-    color: 'from-solar-500 to-solar-600',
-    features: ['Submission review', 'Photo verification', 'Certificate issuance', 'Quality control'],
   },
   // Admin portal removed - accessible only via direct URL
 ];
@@ -385,7 +377,7 @@ export function LandingPage() {
             </p>
           </motion.div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+          <div className="grid grid-cols-1 gap-8 max-w-md mx-auto">
             {portalCards.map((portal, index) => (
               <motion.div
                 key={portal.role}

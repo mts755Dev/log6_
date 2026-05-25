@@ -25,16 +25,16 @@ const roleConfig: Record<UserRole, {
   installer: {
     title: 'Installer Portal',
     subtitle: 'Quotes, proposals & installations',
-    icon: <Wrench className="w-6 h-6" />,
+    icon: <Users className="w-6 h-6" />,
     color: 'text-energy-500',
     bgColor: 'bg-energy-500/10',
   },
   assessor: {
-    title: 'Assessor Portal',
-    subtitle: 'Reviews & certifications',
+    title: 'Installer Portal',
+    subtitle: 'Quotes, proposals & installations',
     icon: <Users className="w-6 h-6" />,
-    color: 'text-solar-500',
-    bgColor: 'bg-solar-500/10',
+    color: 'text-energy-500',
+    bgColor: 'bg-energy-500/10',
   },
   compliance_officer: {
     title: 'Compliance Portal',
@@ -64,8 +64,15 @@ export function LoginPage() {
   const [successMessage, setSuccessMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const config = role && roleConfig[role] ? roleConfig[role] : roleConfig.installer;
-  const currentRole = role || 'installer';
+  const resolvedRole = role === 'assessor' ? 'installer' : role;
+  const config = resolvedRole && roleConfig[resolvedRole] ? roleConfig[resolvedRole] : roleConfig.installer;
+  const currentRole = resolvedRole || 'installer';
+
+  useEffect(() => {
+    if (role === 'assessor') {
+      navigate('/login/installer', { replace: true });
+    }
+  }, [role, navigate]);
 
   // Handle success message from signup
   useEffect(() => {
@@ -97,7 +104,7 @@ export function LoginPage() {
         const roleRoutes: Record<UserRole, string> = {
           admin: '/admin',
           installer: '/installer',
-          assessor: '/assessor',
+          assessor: '/installer',
           compliance_officer: '/compliance/dashboard',
           engineer: '/engineer',
         };
@@ -292,7 +299,7 @@ export function LoginPage() {
               <p className="text-sm text-slate-500 text-center mb-4">Switch portal</p>
               <div className="flex justify-center gap-3">
                 {Object.entries(roleConfig)
-                  .filter(([key]) => key !== 'admin') // Hide admin from portal switcher
+                  .filter(([key]) => key !== 'admin' && key !== 'assessor')
                   .map(([key, value]) => (
                   <Link
                     key={key}
