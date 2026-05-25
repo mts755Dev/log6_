@@ -18,6 +18,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { format } from 'date-fns';
+import { terminateWorker } from '../../utils/documentScanner';
 import { Select } from '../../components/ui/Select';
 import type {
   InstallerOnboardingDoc,
@@ -26,6 +27,18 @@ import type {
   ConsumerCode,
 } from '../../types';
 import { CONSUMER_CODE_LABELS } from '../../types';
+
+const DOCUMENT_UPLOAD_FIELDS: Partial<
+  Record<OnboardingDocumentType, { showDates: boolean; showReference: boolean; showProvider: boolean }>
+> = {
+  competency_cards: { showDates: true, showReference: true, showProvider: true },
+  course_certificates: { showDates: true, showReference: true, showProvider: true },
+  insurance: { showDates: true, showReference: true, showProvider: true },
+  mcs_certificate: { showDates: true, showReference: true, showProvider: false },
+  ibg_certificate: { showDates: true, showReference: true, showProvider: true },
+  waste_carrier_license: { showDates: true, showReference: true, showProvider: true },
+  weee_license: { showDates: true, showReference: true, showProvider: true },
+};
 
 const REQUIRED_DOCUMENTS: Array<{
   type: OnboardingDocumentType;
@@ -42,12 +55,25 @@ const REQUIRED_DOCUMENTS: Array<{
   { type: 'weee_license', label: 'WEEE Transfer License', description: 'WEEE transfer license (if applicable)', required: false },
 ];
 
+/** Required document files that admins review individually (progress bars use this count only) */
+const ONBOARDING_DOCUMENT_COUNT = REQUIRED_DOCUMENTS.filter((d) => d.required).length;
+
 export function OnboardingPage() {
   const { user } = useAuth();
   const toast = useToast();
   const [documents, setDocuments] = useState<InstallerOnboardingDoc[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [progress, setProgress] = useState(0);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [verificationProgress, setVerificationProgress] = useState(0);
+  const [onboardingStatus, setOnboardingStatus] = useState<string>('pending');
+  const [progressStats, setProgressStats] = useState({
+    uploaded: 0,
+    approved: 0,
+    pendingReview: 0,
+    needsAction: 0,
+    missing: 0,
+    totalRequired: ONBOARDING_DOCUMENT_COUNT,
+  });
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [currentUploadType, setCurrentUploadType] = useState<{
     type: OnboardingDocumentType;
@@ -61,11 +87,14 @@ export function OnboardingPage() {
       fetchDocuments();
       fetchConsumerCode();
     }
+    return () => {
+      void terminateWorker();
+    };
   }, [user]);
 
   useEffect(() => {
-    if (user?.companyId && documents.length > 0) {
-      calculateProgress();
+    if (user?.companyId) {
+      calculateProgressMetrics();
     }
   }, [documents, user]);
 
@@ -82,7 +111,15 @@ export function OnboardingPage() {
 
       if (error) throw error;
       setDocuments((data || []).map(mapDocument));
-      await calculateProgress();
+
+      const { data: companyData } = await supabase
+        .from('companies')
+        .select('onboarding_status')
+        .eq('id', user.companyId)
+        .single();
+      if (companyData?.onboarding_status) {
+        setOnboardingStatus(companyData.onboarding_status);
+      }
     } catch (error: any) {
       console.error('Error fetching documents:', error);
       toast.error('Failed to load documents');
@@ -96,10 +133,11 @@ export function OnboardingPage() {
     try {
       const { data } = await supabase
         .from('companies')
-        .select('consumer_code')
+        .select('consumer_code, onboarding_status, onboarding_completed_at')
         .eq('id', user.companyId)
         .single();
       if (data?.consumer_code) setConsumerCode(data.consumer_code);
+      if (data?.onboarding_status) setOnboardingStatus(data.onboarding_status);
     } catch (error) {
       console.error('Error fetching consumer code:', error);
     }
@@ -148,24 +186,82 @@ export function OnboardingPage() {
     updatedAt: data.updated_at,
   });
 
-  const calculateProgress = async () => {
+  const calculateProgressMetrics = async () => {
     if (!user?.companyId) return;
-    try {
-      const { data, error } = await supabase
-        .rpc('get_onboarding_progress', { p_company_id: user.companyId });
-      if (error) {
-        toast.error('Failed to calculate progress');
-        return;
+
+    const requiredTypes = REQUIRED_DOCUMENTS.filter((d) => d.required).map((d) => d.type);
+    const totalRequired = requiredTypes.length;
+
+    let uploaded = 0;
+    let approved = 0;
+    let pendingReview = 0;
+    let needsAction = 0;
+    let missing = 0;
+
+    for (const type of requiredTypes) {
+      const doc = documents.find((d) => d.documentType === type);
+      if (!doc) {
+        missing += 1;
+        continue;
       }
-      if (data && Array.isArray(data) && data.length > 0) {
-        setProgress(data[0].completion_percentage || 0);
-      } else {
-        setProgress(0);
+      uploaded += 1;
+      if (doc.status === 'approved') approved += 1;
+      else if (doc.status === 'pending') pendingReview += 1;
+      else if (doc.status === 'rejected' || doc.status === 'requires_update' || doc.status === 'expired') {
+        needsAction += 1;
+      }
+    }
+
+    const uploadPct = Math.round((uploaded / totalRequired) * 100);
+    const verificationPct = Math.round((approved / totalRequired) * 100);
+
+    setUploadProgress(uploadPct);
+    setProgressStats({
+      uploaded,
+      approved,
+      pendingReview,
+      needsAction,
+      missing,
+      totalRequired,
+    });
+
+    let finalVerificationPct = verificationPct;
+    try {
+      const { data: rpcData, error } = await supabase.rpc('get_onboarding_progress', {
+        p_company_id: user.companyId,
+      });
+      if (!error && typeof rpcData === 'number') {
+        finalVerificationPct = rpcData;
       }
     } catch (error) {
-      console.error('Error calculating progress:', error);
+      console.warn('RPC progress fallback to client calculation:', error);
+    }
+
+    setVerificationProgress(finalVerificationPct);
+
+    const allRequiredApproved =
+      approved === totalRequired &&
+      uploaded === totalRequired &&
+      finalVerificationPct === 100;
+
+    if (allRequiredApproved) {
+      setOnboardingStatus('approved');
+      const { data: companyData } = await supabase
+        .from('companies')
+        .select('onboarding_status')
+        .eq('id', user.companyId)
+        .single();
+      if (companyData?.onboarding_status === 'approved') {
+        setOnboardingStatus('approved');
+      }
     }
   };
+
+  const isFullyVerified =
+    progressStats.approved === ONBOARDING_DOCUMENT_COUNT &&
+    progressStats.uploaded === ONBOARDING_DOCUMENT_COUNT;
+
+  const displayOnboardingStatus = isFullyVerified ? 'approved' : onboardingStatus;
 
   const openUploadModal = (type: OnboardingDocumentType, label: string) => {
     setCurrentUploadType({ type, label });
@@ -204,8 +300,7 @@ export function OnboardingPage() {
       if (dbError) throw dbError;
 
       toast.success('Document uploaded successfully!');
-      fetchDocuments();
-      calculateProgress();
+      await fetchDocuments();
     } catch (error: any) {
       console.error('Error uploading document:', error);
       toast.error('Failed to upload document');
@@ -226,6 +321,30 @@ export function OnboardingPage() {
       requires_update: 'bg-orange-500/20 text-orange-400',
     };
     return colors[status];
+  };
+
+  const getOnboardingStatusLabel = (status: string) => {
+    const labels: Record<string, string> = {
+      pending: 'Not started',
+      documents_submitted: 'Documents submitted',
+      under_review: 'Under admin review',
+      approved: 'Fully verified',
+      rejected: 'Requires updates',
+      requires_update: 'Requires updates',
+    };
+    return labels[status] || status.replace(/_/g, ' ');
+  };
+
+  const getOnboardingStatusColor = (status: string) => {
+    const colors: Record<string, string> = {
+      pending: 'bg-slate-500/20 text-slate-400',
+      documents_submitted: 'bg-blue-500/20 text-blue-400',
+      under_review: 'bg-yellow-500/20 text-yellow-400',
+      approved: 'bg-green-500/20 text-green-400',
+      rejected: 'bg-red-500/20 text-red-400',
+      requires_update: 'bg-orange-500/20 text-orange-400',
+    };
+    return colors[status] || 'bg-slate-500/20 text-slate-400';
   };
 
   const getStatusIcon = (status: OnboardingDocumentStatus) => {
@@ -257,22 +376,102 @@ export function OnboardingPage() {
         <p className="page-subtitle">Upload required documents for verification</p>
       </div>
 
-      <Card>
-        <div className="flex items-center justify-between mb-4">
+      <Card className="space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             <h2 className="text-xl font-bold text-white">Onboarding Progress</h2>
-            <p className="text-sm text-slate-400">{progress}% complete</p>
+            <p className="text-sm text-slate-400 mt-1 max-w-xl">
+              Track document uploads and admin verification for your {ONBOARDING_DOCUMENT_COUNT} required files.
+            </p>
           </div>
-          <div className="text-right">
-            <Badge className={progress === 100 ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}>
-              {progress === 100 ? <CheckCircle className="w-4 h-4 mr-1" /> : <Clock className="w-4 h-4 mr-1" />}
-              {progress === 100 ? 'Completed' : 'In Progress'}
-            </Badge>
+          <Badge className={getOnboardingStatusColor(displayOnboardingStatus)}>
+            {displayOnboardingStatus === 'approved' ? (
+              <CheckCircle className="w-4 h-4 mr-1" />
+            ) : (
+              <Clock className="w-4 h-4 mr-1" />
+            )}
+            {getOnboardingStatusLabel(displayOnboardingStatus)}
+          </Badge>
+        </div>
+
+
+
+        <div className="space-y-3">
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-sm font-medium text-white">Upload completeness</p>
+              <p className="text-xs text-slate-400">
+                {progressStats.uploaded} of {ONBOARDING_DOCUMENT_COUNT} documents submitted
+              </p>
+            </div>
+            <p className="text-xs text-slate-500 mb-2">
+              Required document files only.
+            </p>
+            <div className="w-full bg-slate-800 rounded-full h-3">
+              <div
+                className="bg-blue-500 h-3 rounded-full transition-all duration-500"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+            <p className="text-xs text-slate-400 mt-1">{uploadProgress}% uploaded</p>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-sm font-medium text-white">Admin verification</p>
+              <p className="text-xs text-slate-400">
+                {progressStats.approved} of {ONBOARDING_DOCUMENT_COUNT} files approved
+              </p>
+            </div>
+            <div className="w-full bg-slate-800 rounded-full h-3">
+              <div
+                className="bg-green-500 h-3 rounded-full transition-all duration-500"
+                style={{ width: `${verificationProgress}%` }}
+              />
+            </div>
+            <p className="text-xs text-slate-400 mt-1">{verificationProgress}% verified by admin</p>
           </div>
         </div>
-        <div className="w-full bg-slate-800 rounded-full h-4">
-          <div className="bg-primary-500 h-4 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
+
+        <p className="text-[10px] text-slate-500 uppercase tracking-wide pt-1">
+          Document status ({ONBOARDING_DOCUMENT_COUNT} required files)
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="rounded-lg bg-green-500/10 border border-green-500/20 px-3 py-2 text-center">
+            <p className="text-lg font-bold text-green-400">{progressStats.approved}</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wide">Approved</p>
+          </div>
+          <div className="rounded-lg bg-yellow-500/10 border border-yellow-500/20 px-3 py-2 text-center">
+            <p className="text-lg font-bold text-yellow-400">{progressStats.pendingReview}</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wide">Pending review</p>
+          </div>
+          <div className="rounded-lg bg-orange-500/10 border border-orange-500/20 px-3 py-2 text-center">
+            <p className="text-lg font-bold text-orange-400">{progressStats.needsAction}</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wide">Needs re-upload</p>
+          </div>
+          <div className="rounded-lg bg-slate-500/10 border border-slate-600/30 px-3 py-2 text-center">
+            <p className="text-lg font-bold text-slate-300">{progressStats.missing}</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wide">Not uploaded</p>
+          </div>
         </div>
+
+        {isFullyVerified && (
+          <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+            <p className="text-sm text-green-300">
+              <CheckCircle className="w-4 h-4 inline mr-1.5 -mt-0.5" />
+              All required documents are approved. Your company onboarding is fully verified.
+            </p>
+          </div>
+        )}
+
+        {uploadProgress === 100 && verificationProgress < 100 && (
+          <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+            <p className="text-sm text-amber-200/90">
+              <Clock className="w-4 h-4 inline mr-1.5 -mt-0.5" />
+              You have submitted everything. Verification progress updates when an admin approves each document — pending items are normal.
+            </p>
+          </div>
+        )}
       </Card>
 
       {/* Consumer Code Selection */}
@@ -284,7 +483,8 @@ export function OnboardingPage() {
               <h3 className="text-lg font-semibold text-white">Consumer Code Membership</h3>
             </div>
             <p className="text-sm text-slate-400 mb-3">
-              Select your consumer code. The standard leaflet will be automatically attached to customer proposals.
+              Select your consumer code. This is required for proposals but is not counted in the progress bars above.
+              The standard leaflet will be automatically attached to customer proposals.
             </p>
             <div className="max-w-sm">
               <Select
@@ -386,6 +586,9 @@ export function OnboardingPage() {
           onClose={() => setIsUploadModalOpen(false)}
           documentType={currentUploadType.type}
           documentLabel={currentUploadType.label}
+          showDates={DOCUMENT_UPLOAD_FIELDS[currentUploadType.type]?.showDates ?? true}
+          showReference={DOCUMENT_UPLOAD_FIELDS[currentUploadType.type]?.showReference ?? true}
+          showProvider={DOCUMENT_UPLOAD_FIELDS[currentUploadType.type]?.showProvider ?? true}
           onUpload={handleFileUpload}
         />
       )}

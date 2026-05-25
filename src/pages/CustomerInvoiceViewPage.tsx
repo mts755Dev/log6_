@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
+import { useToast } from '../contexts/ToastContext';
 import { motion } from 'framer-motion';
 import {
   Receipt,
@@ -88,6 +89,7 @@ function PaymentForm({ invoice, onSuccess }: { invoice: Invoice; onSuccess: () =
 
 export function CustomerInvoiceViewPage() {
   const { invoiceId } = useParams<{ invoiceId: string }>();
+  const toast = useToast();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
@@ -102,24 +104,15 @@ export function CustomerInvoiceViewPage() {
   const fetchInvoice = async () => {
     try {
       setIsLoading(true);
-      const { data, error } = await supabase
-        .from('invoices')
-        .select('*')
-        .eq('id', invoiceId)
-        .single();
+      const { data, error } = await supabase.functions.invoke('get-public-invoice', {
+        body: { invoiceId },
+      });
 
       if (error) throw error;
+      if (!data?.invoice) throw new Error('Invoice not found');
 
-      const mappedInvoice = mapInvoice(data);
+      const mappedInvoice = mapInvoice(data.invoice);
       setInvoice(mappedInvoice);
-
-      // Mark as viewed
-      if (!data.viewed_at) {
-        await supabase
-          .from('invoices')
-          .update({ viewed_at: new Date().toISOString() })
-          .eq('id', invoiceId);
-      }
     } catch (error: any) {
       console.error('Error fetching invoice:', error);
     } finally {
@@ -171,7 +164,7 @@ export function CustomerInvoiceViewPage() {
       setShowPaymentForm(true);
     } catch (error: any) {
       console.error('Error creating payment intent:', error);
-      alert('Failed to initialize payment');
+      toast.error('Failed to initialize payment. Please try again.');
     }
   };
 

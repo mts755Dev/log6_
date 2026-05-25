@@ -43,13 +43,14 @@ const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || 
 interface PaymentFormProps {
   clientSecret: string;
   quote: Quote;
+  token: string;
   customerName: string;
   customerSignature: string;
   onSuccess: () => void;
   onBack: () => void;
 }
 
-function PaymentForm({ clientSecret, quote, customerName, customerSignature, onSuccess, onBack }: PaymentFormProps) {
+function PaymentForm({ clientSecret, quote, token, customerName, customerSignature, onSuccess, onBack }: PaymentFormProps) {
   const stripe = useStripe();
   const elements = useElements();
   const toast = useToast();
@@ -78,21 +79,18 @@ function PaymentForm({ clientSecret, quote, customerName, customerSignature, onS
       } else if (paymentIntent && paymentIntent.status === 'succeeded') {
         // Payment succeeded! Update quote immediately
         console.log('Payment succeeded, updating quote status...');
-        const { error: updateError } = await supabase
-          .from('quotes')
-          .update({
-            status: 'deposit_paid',
-            deposit_paid: true,
-            deposit_paid_at: new Date().toISOString(),
-            accepted_at: new Date().toISOString(),
-            customer_signature: customerSignature,
-            stripe_payment_intent_id: paymentIntent.id,
-            customer: {
-              ...quote.customer,
-              name: customerName,
+        const { error: updateError } = await supabase.functions.invoke('update-public-quote', {
+          body: {
+            quoteId: quote.id,
+            token,
+            action: 'mark_deposit_paid',
+            payload: {
+              customerName,
+              customerSignature,
+              stripePaymentIntentId: paymentIntent.id,
             },
-          })
-          .eq('id', quote.id);
+          },
+        });
 
         if (updateError) {
           console.error('Error updating quote:', updateError);
@@ -205,29 +203,22 @@ export function CustomerQuoteViewPage() {
       setIsLoading(true);
       setError('');
 
-      // Fetch quote with token validation
-      // The RLS policy will automatically check if the token is valid
-      const { data: quoteData, error: quoteError } = await supabase
-        .from('quotes')
-        .select('*')
-        .eq('id', quoteId)
-        .eq('share_token', token)
-        .single();
+      // Fetch quote with token validation via edge function
+      const { data, error: quoteError } = await supabase.functions.invoke('get-public-quote', {
+        body: { quoteId, token },
+      });
 
       if (quoteError) {
-        if (quoteError.code === 'PGRST116') {
-          // No rows returned - either quote doesn't exist, token is invalid, or link expired
-          setError('Invalid or expired quote link. Please request a new link from your installer.');
-        } else {
-          throw quoteError;
-        }
+        setError('Invalid or expired quote link. Please request a new link from your installer.');
         return;
       }
 
-      if (!quoteData) {
+      if (!data?.quote) {
         setError('Quote not found or link has expired');
         return;
       }
+
+      const quoteData = data.quote;
 
       // Map database format to Quote type
       const mappedQuote: Quote = {
@@ -264,51 +255,8 @@ export function CustomerQuoteViewPage() {
       setQuote(mappedQuote);
       setCustomerName(mappedQuote.customer.name);
 
-      // Fetch company details for branding
-      const { data: companyData } = await supabase
-        .from('companies')
-        .select('*')
-        .eq('id', quoteData.company_id)
-        .single();
-
-      setCompany(companyData);
-
-      // Fetch attached documents
-      const { data: quoteDocuments, error: docsError } = await supabase
-        .from('quote_documents')
-        .select(`
-          *,
-          document:documents(*)
-        `)
-        .eq('quote_id', quoteId);
-
-      console.log('Quote ID:', quoteId);
-      console.log('Quote Documents Result:', quoteDocuments);
-      console.log('Quote Documents Error:', docsError);
-
-      if (quoteDocuments) {
-        const docs = quoteDocuments.map(qd => qd.document).filter(Boolean);
-        console.log('Processed Documents:', docs);
-        setDocuments(docs);
-      }
-
-      // Mark as viewed if not already viewed
-      if (!quoteData.viewed_at && (quoteData.status === 'draft' || quoteData.status === 'sent')) {
-        const updates: any = {
-          status: 'viewed',
-          viewed_at: new Date().toISOString(),
-        };
-        
-        // If coming from draft (never sent), also set sent_at timestamp
-        if (quoteData.status === 'draft' && !quoteData.sent_at) {
-          updates.sent_at = new Date().toISOString();
-        }
-        
-        await supabase
-          .from('quotes')
-          .update(updates)
-          .eq('id', quoteId);
-      }
+      setCompany(data.company || null);
+      setDocuments(data.documents || []);
     } catch (err: any) {
       console.error('Error fetching quote:', err);
       setError(err.message || 'Failed to load quote');
@@ -402,17 +350,18 @@ export function CustomerQuoteViewPage() {
 
     try {
       // Store availability in the quote first
-      const { error: availabilityError } = await supabase
-        .from('quotes')
-        .update({
-          customer_availability: {
+      const { error: availabilityError } = await supabase.functions.invoke('update-public-quote', {
+        body: {
+          quoteId: quote?.id,
+          token,
+          action: 'save_availability',
+          payload: {
             dates: selectedDates,
             timeSlot: preferredTimeSlot,
             notes: additionalNotes,
-            submittedAt: new Date().toISOString(),
           },
-        })
-        .eq('id', quote?.id);
+        },
+      });
 
       if (availabilityError) throw availabilityError;
 
@@ -421,6 +370,7 @@ export function CustomerQuoteViewPage() {
         body: {
           quoteId: quote?.id,
           depositAmount: quote?.deposit,
+          shareToken: token,
         },
       });
 
@@ -1169,6 +1119,7 @@ export function CustomerQuoteViewPage() {
                   <PaymentForm
                     clientSecret={clientSecret}
                     quote={quote}
+                    token={token || ''}
                     customerName={customerName}
                     customerSignature={signatureData}
                     onSuccess={handlePaymentSuccess}

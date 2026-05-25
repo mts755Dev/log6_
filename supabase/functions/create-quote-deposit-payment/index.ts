@@ -24,7 +24,7 @@ serve(async (req) => {
   }
 
   try {
-    const { quoteId, depositAmount } = await req.json()
+    const { quoteId, depositAmount, shareToken } = await req.json()
 
     if (!quoteId || typeof depositAmount !== 'number' || depositAmount <= 0) {
       return new Response(
@@ -37,11 +37,16 @@ serve(async (req) => {
     }
 
     // Get quote details
-    const { data: quote, error: quoteError } = await supabaseAdmin
+    const quoteQuery = supabaseAdmin
       .from('quotes')
       .select('id, reference, deposit, total, company_id, customer')
-      .eq('id', quoteId)
-      .single()
+      .eq('id', quoteId);
+
+    if (shareToken) {
+      quoteQuery.eq('share_token', shareToken);
+    }
+
+    const { data: quote, error: quoteError } = await quoteQuery.single()
 
     if (quoteError || !quote) {
       return new Response(JSON.stringify({ error: 'Quote not found.' }), {

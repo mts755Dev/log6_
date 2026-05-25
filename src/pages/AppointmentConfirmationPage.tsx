@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useToast } from '../contexts/ToastContext';
 import { motion } from 'framer-motion';
 import {
   CheckCircle,
@@ -37,6 +38,7 @@ interface Appointment {
 export function AppointmentConfirmationPage() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
+  const toast = useToast();
 
   const [appointment, setAppointment] = useState<Appointment | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -102,7 +104,7 @@ export function AppointmentConfirmationPage() {
       await fetchAppointment(); // Refresh to get updated data
     } catch (error: any) {
       console.error('Error confirming appointment:', error);
-      alert('Failed to confirm appointment. Please try again or contact us.');
+      toast.error('Failed to confirm appointment. Please try again or contact us.');
     } finally {
       setIsConfirming(false);
     }

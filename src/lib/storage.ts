@@ -104,15 +104,14 @@ export async function saveDocumentMetadata(
   companyId?: string
 ): Promise<void> {
   try {
-    // Get company_id from profile if not provided
-    let finalCompanyId = companyId;
+    let finalCompanyId = companyId?.trim() || null;
     if (!finalCompanyId) {
       const { data: profile } = await supabase
         .from('profiles')
         .select('company_id')
         .eq('id', userId)
         .single();
-      
+
       finalCompanyId = profile?.company_id || null;
     }
 
@@ -120,7 +119,57 @@ export async function saveDocumentMetadata(
       throw new Error('Company ID is required to save documents');
     }
 
-    // Get public URL
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+
+    if (accessToken) {
+      const { data: edgeResult, error: edgeError } = await supabase.functions.invoke(
+        'save-onboarding-document',
+        {
+          body: {
+            companyId: finalCompanyId,
+            userId,
+            documentType,
+            fileName,
+            filePath,
+            fileSize,
+            version,
+            issuedDate: issuedDate || null,
+            expiryDate: expiryDate || null,
+          },
+          headers: { Authorization: `Bearer ${accessToken}` },
+        },
+      );
+
+      let edgePayload = edgeResult as { success?: boolean; error?: string } | null;
+      if (edgeError && 'context' in edgeError) {
+        try {
+          const ctx = (edgeError as { context?: { json?: () => Promise<{ error?: string }> } }).context;
+          const parsed = await ctx?.json?.();
+          if (parsed?.error) {
+            edgePayload = { error: parsed.error };
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!edgeError && edgePayload?.success) {
+        return;
+      }
+
+      const edgeMessage =
+        edgePayload?.error ||
+        edgeError?.message ||
+        'Failed to save document via onboarding service';
+
+      if (!finalCompanyId) {
+        throw new Error(edgeMessage);
+      }
+
+      console.warn('save-onboarding-document failed, falling back to direct insert:', edgeMessage);
+    }
+
     const { data: { publicUrl } } = supabase.storage
       .from(STORAGE_BUCKET)
       .getPublicUrl(filePath);

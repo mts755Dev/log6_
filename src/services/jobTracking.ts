@@ -304,17 +304,18 @@ export async function getQuoteStatusHistory(quoteId: string) {
  */
 export async function getJobPipeline(companyId?: string) {
   try {
-    let query = supabase.from('job_pipeline').select('*');
-
-    if (companyId) {
-      query = query.eq('company_id', companyId);
-    }
-
-    const { data, error } = await query.order('created_at', { ascending: false });
+    const { data, error } = await supabase.functions.invoke('get-job-pipeline', {
+      body: {
+        companyId: companyId || null,
+      },
+    });
 
     if (error) throw error;
+    if (!data?.data) {
+      throw new Error('Invalid job pipeline response');
+    }
 
-    return { success: true, data };
+    return { success: true, data: data.data };
   } catch (error: any) {
     console.error('Error getting job pipeline:', error);
     return { success: false, error: error.message };

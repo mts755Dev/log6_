@@ -44,6 +44,15 @@ export function QuoteStatusBadge({ status }: { status: string }) {
     accepted: { variant: 'success', label: 'Accepted' },
     rejected: { variant: 'danger', label: 'Rejected' },
     expired: { variant: 'warning', label: 'Expired' },
+    deposit_paid: { variant: 'success', label: 'Deposit Paid' },
+    scheduled: { variant: 'primary', label: 'Scheduled' },
+    in_progress: { variant: 'warning', label: 'In Progress' },
+    completed: { variant: 'success', label: 'Completed' },
+    commissioning: { variant: 'warning', label: 'Uploading' },
+    compliance_review: { variant: 'warning', label: 'Under Review' },
+    mcs_certified: { variant: 'success', label: 'MCS Certified' },
+    final_invoice_sent: { variant: 'primary', label: 'Final Invoice' },
+    closed: { variant: 'success', label: 'Closed' },
   };
 
   const config = statusConfig[status] || { variant: 'slate' as const, label: status };

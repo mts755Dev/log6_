@@ -25,3 +25,13 @@ enable_signup = true
 double_confirm_changes = true
 enable_confirmations = false
 
+# Public installer signup — no user JWT exists yet.
+[functions.create-installer-account]
+verify_jwt = false
+
+[functions.save-onboarding-document]
+verify_jwt = true
+
+[functions.cancel-installer-signup]
+verify_jwt = true
+

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -94,6 +94,58 @@ const EMPTY_GROUP: DocumentGroup = {
   files: [], issuedDate: '', expiryDate: '', referenceNumber: '', providerName: '', scanStatus: 'idle',
 };
 
+type InstallerSignupResult = {
+  success?: boolean;
+  userId?: string;
+  companyId?: string;
+  company_id?: string;
+  session?: { access_token: string; refresh_token: string };
+  error?: string;
+};
+
+type PendingInstallerSignup = {
+  userId: string;
+  companyId: string;
+};
+
+const PENDING_SIGNUP_STORAGE_KEY = 'helios_pending_installer_signup';
+
+function readPendingSignupFromStorage(): PendingInstallerSignup | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_SIGNUP_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PendingInstallerSignup;
+    if (parsed?.userId && parsed?.companyId) return parsed;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function writePendingSignupToStorage(signup: PendingInstallerSignup) {
+  sessionStorage.setItem(PENDING_SIGNUP_STORAGE_KEY, JSON.stringify(signup));
+}
+
+function clearPendingSignupStorage() {
+  sessionStorage.removeItem(PENDING_SIGNUP_STORAGE_KEY);
+}
+
+async function parseInstallerSignupInvoke(
+  accountResult: unknown,
+  accountError: Error | null,
+): Promise<InstallerSignupResult | null> {
+  let payload = accountResult as InstallerSignupResult | null;
+  if (!payload && accountError && 'context' in accountError) {
+    try {
+      const ctx = (accountError as { context?: { json?: () => Promise<InstallerSignupResult> } }).context;
+      payload = (await ctx?.json?.()) ?? null;
+    } catch {
+      // ignore
+    }
+  }
+  return payload;
+}
+
 export function SignupPage() {
   const { role } = useParams<{ role: UserRole }>();
   const navigate = useNavigate();
@@ -120,11 +172,135 @@ export function SignupPage() {
 
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingSignup, setPendingSignup] = useState<PendingInstallerSignup | null>(null);
+  const [signupCompleted, setSignupCompleted] = useState(false);
+
+  const pendingSignupRef = useRef<PendingInstallerSignup | null>(null);
+  const signupCompletedRef = useRef(false);
 
   const config = role && roleConfig[role] ? roleConfig[role] : roleConfig.installer;
   const currentRole = role || 'installer';
   const isInstaller = currentRole === 'installer';
   const totalSteps = isInstaller ? 2 : 1;
+
+  useEffect(() => {
+    pendingSignupRef.current = pendingSignup;
+  }, [pendingSignup]);
+
+  useEffect(() => {
+    signupCompletedRef.current = signupCompleted;
+  }, [signupCompleted]);
+
+  const cancelPendingInstallerSignup = useCallback(async () => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) return;
+
+    try {
+      await supabase.functions.invoke('cancel-installer-signup', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch (err) {
+      console.warn('cancel-installer-signup failed:', err);
+    } finally {
+      clearPendingSignupStorage();
+      await supabase.auth.signOut();
+    }
+  }, []);
+
+  const createInstallerAccountOnStep1 = useCallback(async (): Promise<PendingInstallerSignup> => {
+    const { data: accountResult, error: accountError } = await supabase.functions.invoke(
+      'create-installer-account',
+      {
+        body: {
+          email: formData.email,
+          password: formData.password,
+          fullName: formData.fullName,
+          phone: formData.phone || null,
+          companyName: formData.companyName.trim(),
+        },
+      },
+    );
+
+    const accountPayload = await parseInstallerSignupInvoke(accountResult, accountError);
+    const resolvedCompanyId = accountPayload?.companyId || accountPayload?.company_id;
+    const accountFailureMessage =
+      accountPayload?.error ||
+      accountError?.message ||
+      (accountError ? 'Installer signup service failed. Deploy create-installer-account and try again.' : null);
+
+    if (accountFailureMessage || !accountPayload?.success || !accountPayload.userId || !resolvedCompanyId) {
+      throw new Error(
+        accountFailureMessage ||
+          'Account creation failed. Deploy create-installer-account and try again.',
+      );
+    }
+
+    if (accountPayload.session?.access_token && accountPayload.session?.refresh_token) {
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: accountPayload.session.access_token,
+        refresh_token: accountPayload.session.refresh_token,
+      });
+      if (sessionError) {
+        console.warn('setSession after signup failed:', sessionError);
+      }
+    }
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session?.access_token) {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: formData.email,
+        password: formData.password,
+      });
+      if (signInError) {
+        throw new Error('Account created but sign-in failed. Please try again.');
+      }
+    }
+
+    const signup: PendingInstallerSignup = {
+      userId: accountPayload.userId,
+      companyId: String(resolvedCompanyId),
+    };
+    writePendingSignupToStorage(signup);
+    return signup;
+  }, [formData]);
+
+  const resolveInstallerCompanyId = useCallback(
+    async (userId: string, signup: PendingInstallerSignup | null): Promise<string> => {
+      const fromState = signup?.companyId?.trim();
+      if (fromState) return fromState;
+
+      const fromStorage = readPendingSignupFromStorage()?.companyId?.trim();
+      if (fromStorage) return fromStorage;
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('company_id')
+        .eq('id', userId)
+        .maybeSingle();
+      if (profile?.company_id) return String(profile.company_id);
+
+      const { data: company } = await supabase
+        .from('companies')
+        .select('id')
+        .eq('owner_id', userId)
+        .maybeSingle();
+      if (company?.id) return String(company.id);
+
+      throw new Error(
+        'Company ID is missing. Go back to step 1 and click Next again.',
+      );
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const stored = readPendingSignupFromStorage();
+    if (stored) {
+      setPendingSignup(stored);
+      setCurrentStep(1);
+    }
+  }, []);
 
   useEffect(() => {
     document.body.classList.add('dark');
@@ -219,10 +395,13 @@ export function SignupPage() {
   const completedCount = documentSections.filter(s => getDocumentStatus(s.key) !== 'pending').length;
 
   const isStep1Complete = () => {
-    return formData.fullName.trim() !== '' &&
+    const basics =
+      formData.fullName.trim() !== '' &&
       formData.email.trim() !== '' &&
       formData.password.length >= 6 &&
       formData.confirmPassword === formData.password;
+    if (!isInstaller) return basics;
+    return basics && formData.companyName.trim() !== '';
   };
 
   const isStep2Complete = () => {
@@ -236,7 +415,7 @@ export function SignupPage() {
     return allSectionsHandled && consumerCodeSelected && wasteCarrierAnswered && wasteLicenseHandled;
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     setError('');
     if (currentStep === 0) {
       if (!formData.fullName || !formData.email) {
@@ -249,6 +428,30 @@ export function SignupPage() {
       }
       if (formData.password.length < 6) {
         setError('Password must be at least 6 characters');
+        return;
+      }
+      if (isInstaller && !formData.companyName.trim()) {
+        setError('Company name is required');
+        return;
+      }
+
+      if (isInstaller) {
+        setIsLoading(true);
+        try {
+          if (pendingSignup) {
+            await cancelPendingInstallerSignup();
+            setPendingSignup(null);
+          }
+          const created = await createInstallerAccountOnStep1();
+          setPendingSignup(created);
+          pendingSignupRef.current = created;
+          setCurrentStep(1);
+        } catch (err: any) {
+          console.error('Step 1 account creation error:', err);
+          setError(err.message || 'Failed to create installer account');
+        } finally {
+          setIsLoading(false);
+        }
         return;
       }
     }
@@ -274,6 +477,10 @@ export function SignupPage() {
     }
     if (!formData.fullName || !formData.email) {
       setError('Please fill in all required fields');
+      return;
+    }
+    if (isInstaller && !formData.companyName.trim()) {
+      setError('Company name is required');
       return;
     }
     if (isInstaller && !isStep2Complete()) {
@@ -309,62 +516,34 @@ export function SignupPage() {
         return;
       }
 
-      // Installer signup
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-        options: {
-          data: {
-            full_name: formData.fullName,
-            role: currentRole,
-            phone: formData.phone || null,
-            company_name: formData.companyName || null,
-          },
-        },
-      });
+      // Step 2: account + company already created on "Next" (step 1).
+      const activeSignup = pendingSignup ?? readPendingSignupFromStorage();
+      if (!activeSignup?.userId) {
+        throw new Error('Please go back to step 1 and click Next first.');
+      }
 
-      if (signUpError) throw new Error(`Account creation failed: ${signUpError.message}`);
-      if (!data.user) throw new Error('Account creation failed: No user data returned');
-      userId = data.user.id;
+      userId = activeSignup.userId;
 
-      // Create company
-      let companyId: string | null = null;
-      if (formData.companyName?.trim()) {
-        const { data: companyData, error: companyError } = await supabase
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session?.access_token) {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: formData.email,
+          password: formData.password,
+        });
+        if (signInError) {
+          throw new Error('Please sign in to finish uploading documents. Try step 1 again if needed.');
+        }
+      }
+
+      const companyId = await resolveInstallerCompanyId(userId, activeSignup);
+
+      if (selectedConsumerCode) {
+        const { error: companyUpdateError } = await supabase
           .from('companies')
-          .insert({
-            name: formData.companyName,
-            email: formData.email,
-            phone: formData.phone || '',
-            address: '',
-            postcode: '',
-            mcs_number: null,
-            is_umbrella_scheme: false,
-            owner_id: userId,
-            payment_model: null,
-            credit_balance: 5,
-            credit_price: 3.00,
-            subscription_tier: null,
-            subscription_status: 'trial',
-            subscription_end_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-            monthly_proposal_limit: null,
-            proposals_used_this_month: 0,
-            proposal_reset_date: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString(),
-            logo: null,
-            brand_color: '#eab308',
-            consumer_code: selectedConsumerCode || null,
-          })
-          .select('id')
-          .single();
-
-        if (companyError) {
-          console.warn('Company creation failed:', companyError);
-        } else if (companyData) {
-          companyId = companyData.id;
-          await supabase
-            .from('profiles')
-            .update({ company_id: companyId, phone: formData.phone || null })
-            .eq('id', userId);
+          .update({ consumer_code: selectedConsumerCode })
+          .eq('id', companyId);
+        if (companyUpdateError) {
+          throw new Error(`Failed to save consumer code: ${companyUpdateError.message}`);
         }
       }
 
@@ -378,10 +557,11 @@ export function SignupPage() {
           for (const group of groups) {
             for (const file of group.files) {
               const version = await getNextDocumentVersion(userId, dbType);
-              const filePath = await uploadDocument(file, userId, dbType, version);
+              const filePath = await uploadDocument(file, userId, dbType, version, companyId);
               await saveDocumentMetadata(
                 userId, dbType, file.name, filePath, file.size, version,
                 group.issuedDate || undefined, group.expiryDate || undefined,
+                companyId,
               );
             }
           }
@@ -392,8 +572,8 @@ export function SignupPage() {
           for (const group of docGroups.wasteLicense) {
             for (const file of group.files) {
               const version = await getNextDocumentVersion(userId, 'waste_carrier_license');
-              const filePath = await uploadDocument(file, userId, 'waste_carrier_license', version);
-              await saveDocumentMetadata(userId, 'waste_carrier_license', file.name, filePath, file.size, version);
+              const filePath = await uploadDocument(file, userId, 'waste_carrier_license', version, companyId);
+              await saveDocumentMetadata(userId, 'waste_carrier_license', file.name, filePath, file.size, version, undefined, undefined, companyId);
             }
           }
         }
@@ -405,6 +585,11 @@ export function SignupPage() {
         });
         if (settingsError) throw new Error(`Failed to save settings: ${settingsError.message}`);
 
+        signupCompletedRef.current = true;
+        setSignupCompleted(true);
+        clearPendingSignupStorage();
+        await supabase.auth.signOut();
+
         navigate(`/login/${currentRole}`, {
           state: {
             message: hasDeferredDocuments
@@ -413,6 +598,7 @@ export function SignupPage() {
             email: formData.email,
           },
         });
+        setIsLoading(false);
       } catch (uploadError: any) {
         console.error('Document upload error:', uploadError);
         setError(
@@ -576,6 +762,9 @@ export function SignupPage() {
   };
 
   const isLastStep = currentStep === totalSteps - 1;
+  const hasPendingInstallerAccount = Boolean(
+    pendingSignup?.companyId || readPendingSignupFromStorage()?.companyId,
+  );
 
   return (
     <div className="min-h-screen bg-slate-950 flex">
@@ -668,7 +857,7 @@ export function SignupPage() {
                   <Input label="Email Address" name="email" type="email" placeholder="you@company.com" value={formData.email} onChange={handleChange} leftIcon={<Mail className="w-4 h-4" />} required />
                   <Input label="Phone Number (Optional)" name="phone" type="tel" placeholder="+44 7700 900000" value={formData.phone} onChange={handleChange} leftIcon={<Phone className="w-4 h-4" />} />
                   {isInstaller && (
-                    <Input label="Company Name (Optional)" name="companyName" type="text" placeholder="Your Company Ltd" value={formData.companyName} onChange={handleChange} leftIcon={<Building2 className="w-4 h-4" />} />
+                    <Input label="Company Name" name="companyName" type="text" placeholder="Your Company Ltd" value={formData.companyName} onChange={handleChange} leftIcon={<Building2 className="w-4 h-4" />} required />
                   )}
                   <Input label="Password" name="password" type="password" placeholder="••••••••" value={formData.password} onChange={handleChange} leftIcon={<Lock className="w-4 h-4" />} required />
                   <Input label="Confirm Password" name="confirmPassword" type="password" placeholder="••••••••" value={formData.confirmPassword} onChange={handleChange} leftIcon={<Lock className="w-4 h-4" />} required />
@@ -692,6 +881,24 @@ export function SignupPage() {
                       {completedCount}/{documentSections.length} complete
                     </div>
                   </div>
+
+                  {!hasPendingInstallerAccount && (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="flex items-start gap-2.5 p-3 bg-red-500/10 border border-red-500/20 rounded-xl mb-4 flex-shrink-0">
+                      <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-red-300/90 leading-relaxed">
+                        Please complete step 1 first. Click <span className="font-semibold">Back</span>, then <span className="font-semibold">Next</span> to continue.
+                      </p>
+                    </motion.div>
+                  )}
+
+                  {hasPendingInstallerAccount && (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="flex items-start gap-2.5 p-3 bg-green-500/10 border border-green-500/20 rounded-xl mb-4 flex-shrink-0">
+                      <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-green-300/90 leading-relaxed">
+                        Upload your documents below, then continue to finish registration.
+                      </p>
+                    </motion.div>
+                  )}
 
                   {hasDeferredDocuments && (
                     <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="flex items-start gap-2.5 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl mb-4 flex-shrink-0">
@@ -798,10 +1005,11 @@ export function SignupPage() {
                   onClick={handleNext}
                   className={currentStep === 0 ? 'w-full' : 'flex-1'}
                   size="lg"
-                  disabled={!canProceed()}
+                  isLoading={isLoading && currentStep === 0}
+                  disabled={!canProceed() || isLoading}
                   rightIcon={<ArrowRight className="w-4 h-4" />}
                 >
-                  {currentStep === 1 ? 'Next' : 'Next'}
+                  Next
                 </Button>
               ) : (
                 <Button
@@ -809,10 +1017,14 @@ export function SignupPage() {
                   className="flex-1"
                   size="lg"
                   isLoading={isLoading}
-                  disabled={isInstaller && currentStep === 1 && !isStep2Complete()}
+                  disabled={
+                    isInstaller &&
+                    currentStep === 1 &&
+                    (!isStep2Complete() || !hasPendingInstallerAccount)
+                  }
                   rightIcon={<ArrowRight className="w-4 h-4" />}
                 >
-                  {hasDeferredDocuments ? 'Create Account (Upload Docs Later)' : 'Create Account'}
+                  Complete Signup
                 </Button>
               )}
             </div>

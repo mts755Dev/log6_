@@ -24,12 +24,63 @@ import { useToast } from '../../contexts/ToastContext';
 import { format } from 'date-fns';
 import type { InstallerOnboardingDoc, OnboardingDocumentStatus } from '../../types';
 
+/** Admin-reviewed onboarding files (excludes consumer code selection). */
+const REQUIRED_ONBOARDING_DOC_TYPES = [
+  'competency_cards',
+  'course_certificates',
+  'insurance',
+  'mcs_certificate',
+  'ibg_certificate',
+] as const;
+
+function formatOnboardingStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    pending: 'Pending',
+    documents_submitted: 'Documents submitted',
+    under_review: 'Under review',
+    approved: 'Verified',
+    rejected: 'Rejected',
+    requires_update: 'Requires update',
+  };
+  return labels[status] || status.replace(/_/g, ' ');
+}
+
+function isCompanyFullyVerified(companyDocs: InstallerOnboardingDoc[]): boolean {
+  return REQUIRED_ONBOARDING_DOC_TYPES.every((type) =>
+    companyDocs.some((d) => d.documentType === type && d.status === 'approved'),
+  );
+}
+
 interface Company {
   id: string;
   name: string;
   onboardingStatus: string;
   onboardingCompletedAt?: string;
 }
+
+const mapDocument = (data: Record<string, unknown>): InstallerOnboardingDoc => ({
+  id: data.id as string,
+  companyId: data.company_id as string,
+  uploadedBy: data.uploaded_by as string | undefined,
+  documentType: data.document_type as InstallerOnboardingDoc['documentType'],
+  fileName: data.file_name as string,
+  fileUrl: data.file_url as string,
+  fileSize: data.file_size as number | undefined,
+  mimeType: data.mime_type as string | undefined,
+  issuedDate: data.issued_date as string | undefined,
+  expiryDate: data.expiry_date as string | undefined,
+  referenceNumber: data.reference_number as string | undefined,
+  providerName: data.provider_name as string | undefined,
+  status: data.status as OnboardingDocumentStatus,
+  reviewedBy: data.reviewed_by as string | undefined,
+  reviewedAt: data.reviewed_at as string | undefined,
+  rejectionReason: data.rejection_reason as string | undefined,
+  adminNotes: data.admin_notes as string | undefined,
+  version: data.version as number,
+  isCurrent: data.is_current as boolean,
+  createdAt: data.created_at as string,
+  updatedAt: data.updated_at as string,
+});
 
 export function VerificationPage() {
   const { user } = useAuth();
@@ -45,6 +96,35 @@ export function VerificationPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
+  const [docsByCompanyId, setDocsByCompanyId] = useState<Record<string, InstallerOnboardingDoc[]>>({});
+
+  const syncCompanyOnboardingStatus = async (companyId: string) => {
+    try {
+      const { data: progress, error: rpcError } = await supabase.rpc('get_onboarding_progress', {
+        p_company_id: companyId,
+      });
+      if (rpcError) return;
+
+      if (progress === 100) {
+        await supabase
+          .from('companies')
+          .update({
+            onboarding_status: 'approved',
+            onboarding_completed_at: new Date().toISOString(),
+          })
+          .eq('id', companyId);
+      }
+    } catch (error) {
+      console.warn('Could not sync company onboarding status:', error);
+    }
+  };
+
+  const getDisplayOnboardingStatus = (companyId: string, dbStatus: string): string => {
+    const companyDocs = docsByCompanyId[companyId] || [];
+    if (isCompanyFullyVerified(companyDocs)) return 'approved';
+    if (companyDocs.some((d) => d.status === 'pending')) return 'under_review';
+    return dbStatus;
+  };
 
   useEffect(() => {
     fetchCompanies();
@@ -59,12 +139,27 @@ export function VerificationPage() {
   const fetchCompanies = async () => {
     try {
       setIsLoading(true);
-      const { data, error } = await supabase
-        .from('companies')
-        .select('id, name, onboarding_status, onboarding_completed_at')
-        .order('created_at', { ascending: false });
+      const [{ data, error }, { data: allDocs, error: docsError }] = await Promise.all([
+        supabase
+          .from('companies')
+          .select('id, name, onboarding_status, onboarding_completed_at')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('installer_onboarding_docs')
+          .select('*')
+          .eq('is_current', true),
+      ]);
 
       if (error) throw error;
+      if (docsError) throw docsError;
+
+      const grouped: Record<string, InstallerOnboardingDoc[]> = {};
+      (allDocs || []).forEach((row) => {
+        const doc = mapDocument(row);
+        if (!grouped[doc.companyId]) grouped[doc.companyId] = [];
+        grouped[doc.companyId].push(doc);
+      });
+      setDocsByCompanyId(grouped);
 
       setCompanies(
         (data || []).map((c) => ({
@@ -76,7 +171,7 @@ export function VerificationPage() {
       );
 
       if (data && data.length > 0) {
-        setSelectedCompany(data[0].id);
+        setSelectedCompany((prev) => prev ?? data[0].id);
       }
     } catch (error: any) {
       console.error('Error fetching companies:', error);
@@ -104,30 +199,6 @@ export function VerificationPage() {
       toast.error('Failed to load documents');
     }
   };
-
-  const mapDocument = (data: any): InstallerOnboardingDoc => ({
-    id: data.id,
-    companyId: data.company_id,
-    uploadedBy: data.uploaded_by,
-    documentType: data.document_type,
-    fileName: data.file_name,
-    fileUrl: data.file_url,
-    fileSize: data.file_size,
-    mimeType: data.mime_type,
-    issuedDate: data.issued_date,
-    expiryDate: data.expiry_date,
-    referenceNumber: data.reference_number,
-    providerName: data.provider_name,
-    status: data.status,
-    reviewedBy: data.reviewed_by,
-    reviewedAt: data.reviewed_at,
-    rejectionReason: data.rejection_reason,
-    adminNotes: data.admin_notes,
-    version: data.version,
-    isCurrent: data.is_current,
-    createdAt: data.created_at,
-    updatedAt: data.updated_at,
-  });
 
   const openReviewModal = (doc: InstallerOnboardingDoc, action: 'approve' | 'reject') => {
     setSelectedDoc(doc);
@@ -166,10 +237,14 @@ export function VerificationPage() {
 
       if (error) throw error;
 
+      if (selectedCompany) {
+        await syncCompanyOnboardingStatus(selectedCompany);
+      }
+
       toast.success(`Document ${reviewAction}d successfully`);
       setIsReviewModalOpen(false);
-      fetchDocuments(selectedCompany!);
-      fetchCompanies(); // Refresh company status
+      await fetchDocuments(selectedCompany!);
+      await fetchCompanies();
     } catch (error: any) {
       console.error('Error submitting review:', error);
       toast.error('Failed to submit review');
@@ -228,14 +303,23 @@ export function VerificationPage() {
     }
   };
 
-  const handleBulkActionComplete = () => {
+  const handleBulkActionComplete = async () => {
     setSelectedDocuments([]);
-    fetchDocuments(selectedCompany!);
-    fetchCompanies();
+    if (selectedCompany) {
+      await syncCompanyOnboardingStatus(selectedCompany);
+    }
+    await fetchDocuments(selectedCompany!);
+    await fetchCompanies();
   };
 
   const selectedCompanyData = companies.find((c) => c.id === selectedCompany);
+  const selectedCompanyDisplayStatus = selectedCompanyData
+    ? getDisplayOnboardingStatus(selectedCompanyData.id, selectedCompanyData.onboardingStatus)
+    : 'pending';
   const pendingCount = documents.filter((d) => d.status === 'pending').length;
+  const selectedCompanyVerified = selectedCompany
+    ? isCompanyFullyVerified(documents)
+    : false;
   const selectedDocsData = documents.filter(d => selectedDocuments.includes(d.id));
 
   if (isLoading) {
@@ -278,8 +362,8 @@ export function VerificationPage() {
                   <Building2 className="w-4 h-4 text-slate-400" />
                   <span className="font-semibold text-white text-sm">{company.name}</span>
                 </div>
-                <Badge className={getCompanyOnboardingColor(company.onboardingStatus)}>
-                  {company.onboardingStatus.replace(/_/g, ' ')}
+                <Badge className={getCompanyOnboardingColor(getDisplayOnboardingStatus(company.id, company.onboardingStatus))}>
+                  {formatOnboardingStatusLabel(getDisplayOnboardingStatus(company.id, company.onboardingStatus))}
                 </Badge>
               </motion.button>
             ))}
@@ -303,15 +387,24 @@ export function VerificationPage() {
                   <div>
                     <h2 className="text-2xl font-bold text-white">{selectedCompanyData.name}</h2>
                     <p className="text-sm text-slate-400">
-                      {pendingCount} document{pendingCount !== 1 ? 's' : ''} pending review
+                      {selectedCompanyVerified
+                        ? `All ${REQUIRED_ONBOARDING_DOC_TYPES.length} required documents verified`
+                        : `${pendingCount} document${pendingCount !== 1 ? 's' : ''} pending review`}
                       {selectedDocuments.length > 0 && ` • ${selectedDocuments.length} selected`}
                     </p>
                   </div>
                 </div>
-                <Badge className={getCompanyOnboardingColor(selectedCompanyData.onboardingStatus)}>
-                  {selectedCompanyData.onboardingStatus.replace(/_/g, ' ')}
+                <Badge className={getCompanyOnboardingColor(selectedCompanyDisplayStatus)}>
+                  {formatOnboardingStatusLabel(selectedCompanyDisplayStatus)}
                 </Badge>
               </div>
+              {selectedCompanyVerified && (
+                <div className="mt-3 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+                  <p className="text-sm text-green-300">
+                    All required onboarding documents are approved. This company is fully verified.
+                  </p>
+                </div>
+              )}
             </Card>
           )}
 

@@ -49,9 +49,41 @@ npx supabase functions deploy
 ### Deploy a specific function:
 ```bash
 npx supabase functions deploy create-engineer
+npx supabase functions deploy create-installer-account --no-verify-jwt
+npx supabase functions deploy cancel-installer-signup
+npx supabase functions deploy save-onboarding-document
+npx supabase functions deploy create-company
+npx supabase functions deploy get-public-invoice
+npx supabase functions deploy get-job-pipeline
+npx supabase functions deploy get-payment-history
+npx supabase functions deploy get-public-quote
+npx supabase functions deploy update-public-quote
 ```
 
 ## Available Functions
+
+### create-company
+Creates a company for a newly signed-up installer (or admin) and links it to the caller profile.
+
+**Request Body:**
+```json
+{
+  "name": "Your Company Ltd",
+  "email": "owner@company.com",
+  "phone": "+44 7700 900000",
+  "mcsNumber": "MCS/12345",
+  "address": "1 Main Street",
+  "postcode": "SW1A 1AA",
+  "brandColor": "#eab308",
+  "consumerCode": "HIES"
+}
+```
+
+**Features:**
+- Requires authenticated installer/admin token
+- Creates company with trial defaults
+- Automatically links `profiles.company_id`
+- Prevents direct client inserts on `companies`
 
 ### create-engineer
 Creates a new engineer account and sends a welcome email with login credentials.
@@ -72,6 +104,108 @@ Creates a new engineer account and sends a welcome email with login credentials.
 - Creates profile in database
 - Sends welcome email with credentials
 - Auto-rollback if any step fails
+
+### get-public-invoice
+Fetches a customer-facing invoice by ID using service role access and marks it as viewed.
+
+**Request Body:**
+```json
+{
+  "invoiceId": "INV-123456"
+}
+```
+
+**Features:**
+- Works for anonymous customer invoice page
+- Returns only invoices in `pending` or `paid` states
+- Updates `viewed_at` on first read
+- Lets `invoices` table stay protected by RLS
+
+### get-job-pipeline
+Returns job pipeline rows for dashboards with role-aware access checks.
+
+**Request Body:**
+```json
+{
+  "companyId": "optional-company-id"
+}
+```
+
+**Features:**
+- Requires authenticated user token
+- Admin can see all companies (or filter by `companyId`)
+- Non-admin users are restricted to their own `profiles.company_id`
+- Replaces direct API reads from `job_pipeline` view
+
+### get-payment-history
+Returns payment history rows with role-aware access checks.
+
+**Request Body:**
+```json
+{
+  "companyId": "optional-company-id",
+  "limit": 100
+}
+```
+
+**Features:**
+- Requires authenticated user token
+- Admin can view all companies (or filter by `companyId`)
+- Non-admin users are restricted to their own `profiles.company_id`
+- Replaces direct API reads from `payment_history` view
+
+### get-public-quote
+Fetches a customer-facing quote by ID + share token and returns related company/documents.
+
+**Request Body:**
+```json
+{
+  "quoteId": "quote-abc123",
+  "token": "secure-share-token"
+}
+```
+
+**Features:**
+- Works for anonymous customer quote page
+- Validates quote link using `share_token`
+- Marks quote as viewed when first opened
+- Returns quote, company, and attached proposal documents
+
+### update-public-quote
+Applies controlled customer updates on shared quotes by ID + token.
+
+**Request Body (examples):**
+```json
+{
+  "quoteId": "quote-abc123",
+  "token": "secure-share-token",
+  "action": "save_availability",
+  "payload": {
+    "dates": ["2026-05-30"],
+    "timeSlot": "morning",
+    "notes": "..."
+  }
+}
+```
+
+```json
+{
+  "quoteId": "quote-abc123",
+  "token": "secure-share-token",
+  "action": "mark_deposit_paid",
+  "payload": {
+    "customerName": "Jane Doe",
+    "customerSignature": "data:image/png;base64,...",
+    "stripePaymentIntentId": "pi_123"
+  }
+}
+```
+
+**Features:**
+- Works for anonymous customer acceptance flow
+- Validates quote link using `share_token`
+- Supports only safe action-based updates
+- Lets `quotes` stay protected by authenticated-only RLS policies
 
 ## Email Templates
 

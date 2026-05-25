@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   User, 
@@ -32,6 +33,14 @@ import { supabase } from '../../lib/supabase';
 import type { User as UserType } from '../../types';
 import { uploadDocument, saveDocumentMetadata, getNextDocumentVersion } from '../../lib/storage';
 
+const ONBOARDING_REQUIRED_DOCS: Array<{ type: string; label: string }> = [
+  { type: 'competency_cards', label: 'Competency Cards' },
+  { type: 'course_certificates', label: 'Course Completion Certificates' },
+  { type: 'insurance', label: 'Insurance Documents' },
+  { type: 'mcs_certificate', label: 'MCS Certificate' },
+  { type: 'ibg_certificate', label: 'IBG Provider Certificate' },
+];
+
 export function SettingsPage() {
   const { user, setUser } = useAuth();
   const { getCompany, refreshData } = useData();
@@ -58,6 +67,11 @@ export function SettingsPage() {
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   const company = user?.companyId ? getCompany(user.companyId) : null;
+
+  const missingOnboardingDocs = useMemo(() => {
+    const uploadedTypes = new Set(documents.map((doc) => doc.document_type));
+    return ONBOARDING_REQUIRED_DOCS.filter((doc) => !uploadedTypes.has(doc.type));
+  }, [documents]);
 
   // Profile form state
   const [profileForm, setProfileForm] = useState({
@@ -427,50 +441,34 @@ export function SettingsPage() {
 
     try {
       if (!company) {
-        // Create new company with 5 FREE trial credits
-        console.log('Creating new company with 5 free trial credits...');
-        
-        const { data: newCompany, error: createError } = await supabase
-          .from('companies')
-          .insert({
-            name: companyForm.name,
-            email: companyForm.email,
-            phone: companyForm.phone || '',
-            mcs_number: companyForm.mcsNumber || null,
-            address: companyForm.address || '',
-            postcode: companyForm.postcode || '',
-            is_umbrella_scheme: false,
-            owner_id: user?.id, // Link company to the user who created it
-            payment_model: null, // No payment model chosen yet - on trial
-            credit_balance: 5, // 5 FREE trial credits
-            credit_price: 3.00,
-            subscription_tier: null, // No tier yet - on trial
-            subscription_status: 'trial',
-            subscription_end_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-            monthly_proposal_limit: null,
-            proposals_used_this_month: 0,
-            proposal_reset_date: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString(),
-            logo: null,
-            brand_color: companyForm.brandColor,
-          })
-          .select('id')
-          .single();
+        console.log('Creating new company through edge function...');
 
-        if (createError) throw createError;
-        
-        if (!newCompany) {
-          throw new Error('Failed to create company');
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData.session?.access_token;
+        if (!accessToken) {
+          throw new Error('You must be signed in to create a company');
         }
 
-        // Link company to user profile
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .update({ company_id: newCompany.id })
-          .eq('id', user?.id);
+        const { data: companyResult, error: createError } = await supabase.functions.invoke('create-company', {
+          body: {
+            name: companyForm.name,
+            email: companyForm.email,
+            phone: companyForm.phone || null,
+            mcsNumber: companyForm.mcsNumber || null,
+            address: companyForm.address || '',
+            postcode: companyForm.postcode || '',
+            brandColor: companyForm.brandColor,
+          },
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
 
-        if (profileError) throw profileError;
+        if (createError || !companyResult?.success) {
+          throw new Error(createError?.message || companyResult?.error || 'Failed to create company');
+        }
 
-        console.log('Company created and linked successfully');
+        console.log('Company created successfully');
         await refreshData();
         toast.success('Company created successfully! You have 5 FREE trial credits to get started. 🎉');
       } else {
@@ -1057,8 +1055,11 @@ export function SettingsPage() {
                     <FileText className="w-16 h-16 text-slate-600 mx-auto mb-4" />
                     <p className="text-slate-300 font-medium mb-2">No documents uploaded yet</p>
                     <p className="text-slate-500 text-sm">
-                      Documents uploaded during signup will appear here.<br />
-                      Once uploaded, you can view, download, and update them anytime.
+                      Upload your certifications and compliance documents in{' '}
+                      <Link to="/installer/onboarding" className="text-primary-400 hover:text-primary-300 font-medium">
+                        Onboarding
+                      </Link>
+                      . Once uploaded, you can view, download, and update them here.
                     </p>
                   </div>
                 ) : (
@@ -1207,11 +1208,19 @@ export function SettingsPage() {
                   </div>
                 )}
 
-                {documents.length > 0 && (
-                  <div className="mt-4 p-3 bg-primary-500/5 border border-primary-500/20 rounded-lg">
-                    <p className="text-xs text-slate-400">
-                      <strong className="text-primary-400">💡 Tip:</strong> Click "Update" on any document to upload a new version. 
-                      The version number will increment automatically and the old version will be preserved.
+                {missingOnboardingDocs.length > 0 && (
+                  <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                    <p className="text-xs text-amber-200/90 leading-relaxed">
+                      <strong className="text-amber-300">💡 Tip:</strong> You still need to upload:{' '}
+                      <span className="font-medium">{missingOnboardingDocs.map((d) => d.label).join(', ')}</span>.
+                      {' '}Go to the{' '}
+                      <Link
+                        to="/installer/onboarding"
+                        className="text-primary-400 hover:text-primary-300 font-semibold underline underline-offset-2"
+                      >
+                        Onboarding
+                      </Link>
+                      {' '}page to upload the remaining documents required for MCS compliance.
                     </p>
                   </div>
                 )}
