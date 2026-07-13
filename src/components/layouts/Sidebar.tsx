@@ -22,6 +22,8 @@ import {
   Wrench,
   Briefcase,
   Calendar as CalendarIcon,
+  Bot,
+  BookOpen,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { useAuth } from '../../contexts/AuthContext';
@@ -48,6 +50,8 @@ const navigationConfig: Record<UserRole, NavItem[]> = {
     { label: 'Users', path: '/admin/users', icon: <Users className="sidebar-icon" /> },
     { label: 'Products', path: '/admin/products', icon: <Package className="sidebar-icon" /> },
     { label: 'Documents', path: '/admin/documents', icon: <Files className="sidebar-icon" /> },
+    { label: 'Assistant', path: '/admin/assistant', icon: <Bot className="sidebar-icon" /> },
+    { label: 'Question Bank', path: '/admin/assistant/questions', icon: <BookOpen className="sidebar-icon" /> },
     { label: 'Templates', path: '/admin/templates', icon: <FileCode className="sidebar-icon" /> },
     { label: 'Verification', path: '/admin/verification', icon: <Shield className="sidebar-icon" /> },
     { label: 'Invoices', path: '/admin/invoices', icon: <Receipt className="sidebar-icon" /> },

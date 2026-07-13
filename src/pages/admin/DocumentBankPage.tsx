@@ -9,6 +9,7 @@ import {
   Filter,
   Search,
   FileType,
+  Sparkles,
 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -17,6 +18,8 @@ import { Modal } from '../../components/ui/Modal';
 import { Badge } from '../../components/ui/Badge';
 import { useToast } from '../../contexts/ToastContext';
 import { supabase } from '../../lib/supabase';
+import { queueDocumentIndexing, fetchDocumentIndexStatuses } from '../../services/assistant';
+import type { DocumentIndexStatus } from '../../services/assistant';
 import type { Document as DocumentType, DocumentCategory, InsuranceProvider, ProductType } from '../../types';
 
 export function DocumentBankPage() {
@@ -35,6 +38,8 @@ export function DocumentBankPage() {
   
   // Upload form state
   const [uploading, setUploading] = useState(false);
+  const [indexingId, setIndexingId] = useState<string | null>(null);
+  const [indexStatuses, setIndexStatuses] = useState<Record<string, DocumentIndexStatus>>({});
   const [uploadForm, setUploadForm] = useState({
     name: '',
     description: '',
@@ -49,7 +54,17 @@ export function DocumentBankPage() {
   useEffect(() => {
     fetchDocuments();
     fetchProducts();
+    void loadIndexStatuses();
   }, [filterCategory]);
+
+  const loadIndexStatuses = async () => {
+    try {
+      const statuses = await fetchDocumentIndexStatuses();
+      setIndexStatuses(statuses);
+    } catch {
+      // non-fatal for document list
+    }
+  };
 
   const fetchDocuments = async () => {
     try {
@@ -200,7 +215,7 @@ export function DocumentBankPage() {
         .getPublicUrl(filePath);
 
       // Create document record
-      const { error: dbError } = await supabase.from('documents').insert({
+      const { data: newDoc, error: dbError } = await supabase.from('documents').insert({
         name: uploadForm.name,
         description: uploadForm.description || null,
         category: uploadForm.category,
@@ -212,11 +227,16 @@ export function DocumentBankPage() {
         consumer_code: uploadForm.consumerCode || null,
         product_id: uploadForm.productId || null,
         product_type: uploadForm.productType || null,
-      });
+      }).select('id').single();
 
       if (dbError) throw dbError;
 
-      toast.success('Document uploaded successfully!');
+      try {
+        await queueDocumentIndexing(newDoc.id);
+        toast.success('Document uploaded and queued for AI indexing');
+      } catch {
+        toast.success('Document uploaded successfully!');
+      }
       setShowUploadModal(false);
       setUploadForm({
         name: '',
@@ -264,6 +284,36 @@ export function DocumentBankPage() {
   const handleView = (doc: DocumentType) => {
     setSelectedDocument(doc);
     setShowViewModal(true);
+  };
+
+  const handleIndexForAssistant = async (doc: DocumentType) => {
+    try {
+      setIndexingId(doc.id);
+      const result = await queueDocumentIndexing(doc.id, 'compliance');
+      toast.success(result?.message || 'Document indexed for AI');
+      await loadIndexStatuses();
+    } catch (error: any) {
+      console.error('Error indexing document:', error);
+      toast.error(error.message || 'Failed to index document');
+    } finally {
+      setIndexingId(null);
+    }
+  };
+
+  const getIndexBadge = (docId: string) => {
+    const status = indexStatuses[docId];
+    if (!status) return null;
+    const colors = {
+      indexed: 'bg-emerald-500/20 text-emerald-300',
+      pending: 'bg-amber-500/20 text-amber-300',
+      failed: 'bg-red-500/20 text-red-300',
+    };
+    return (
+      <Badge className={colors[status.status]}>
+        AI: {status.status}
+        {status.status === 'indexed' ? ` (${status.vectorCount})` : ''}
+      </Badge>
+    );
   };
 
   const filteredDocuments = documents.filter(doc =>
@@ -356,6 +406,7 @@ export function DocumentBankPage() {
                         <Badge className={getCategoryBadge(doc.category)}>
                           {doc.category.replace('_', ' ')}
                         </Badge>
+                        {getIndexBadge(doc.id)}
                       </div>
                       {doc.description && (
                         <p className="text-slate-400 text-sm mb-2">{doc.description}</p>
@@ -383,6 +434,15 @@ export function DocumentBankPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => void handleIndexForAssistant(doc)}
+                      isLoading={indexingId === doc.id}
+                      leftIcon={<Sparkles className="w-4 h-4" />}
+                    >
+                      Index AI
+                    </Button>
                     <Button
                       variant="secondary"
                       size="sm"

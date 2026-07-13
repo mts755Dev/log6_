@@ -37,3 +37,7 @@ heliOS/
 supabase/migrations/*.sql
 supabase/.branches
 supabase/.temp
+
+# Internal architecture documentation
+docs/
+scripts/

@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Menu } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { Logo } from '../ui/Logo';
+import { AssistantWidget } from '../assistant/AssistantWidget';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import type { UserRole } from '../../types';
@@ -121,6 +122,8 @@ export function DashboardLayout({ requiredRole }: DashboardLayoutProps) {
           <Outlet />
         </motion.div>
       </main>
+
+      {(user.role === 'installer' || user.role === 'admin') && <AssistantWidget />}
     </div>
   );
 }

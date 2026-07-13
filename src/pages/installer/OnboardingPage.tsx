@@ -13,6 +13,7 @@ import {
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
+import { queueQmsDocumentIndexing } from '../../services/assistant';
 import { DocumentUploadModal } from '../../components/onboarding/DocumentUploadModal';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -283,7 +284,7 @@ export function OnboardingPage() {
 
       const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(fileName);
 
-      const { error: dbError } = await supabase.from('installer_onboarding_docs').insert({
+      const { data: newDoc, error: dbError } = await supabase.from('installer_onboarding_docs').insert({
         company_id: user.companyId,
         uploaded_by: user.id,
         document_type: type,
@@ -296,8 +297,12 @@ export function OnboardingPage() {
         reference_number: metadata.referenceNumber || null,
         provider_name: metadata.providerName || null,
         status: 'pending',
-      });
+      }).select('id').single();
       if (dbError) throw dbError;
+
+      void queueQmsDocumentIndexing(newDoc.id).catch(() => {
+        // Indexing may fail until doc is approved; reindex cron will retry
+      });
 
       toast.success('Document uploaded successfully!');
       await fetchDocuments();

@@ -16,6 +16,7 @@ import {
   Camera,
   Trash2,
   Loader2,
+  Bot,
 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -32,6 +33,8 @@ import { useToast } from '../../contexts/ToastContext';
 import { supabase } from '../../lib/supabase';
 import type { User as UserType } from '../../types';
 import { uploadDocument, saveDocumentMetadata, getNextDocumentVersion } from '../../lib/storage';
+import { getAssistantProfile, saveAssistantProfile } from '../../services/assistant';
+import type { CoachingLevel, CompetenceLevel } from '../../types/assistant';
 
 const ONBOARDING_REQUIRED_DOCS: Array<{ type: string; label: string }> = [
   { type: 'competency_cards', label: 'Competency Cards' },
@@ -65,6 +68,10 @@ export function SettingsPage() {
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+
+  const [coachingLevel, setCoachingLevel] = useState<CoachingLevel>('balanced');
+  const [competenceLevel, setCompetenceLevel] = useState<CompetenceLevel>('intermediate');
+  const [savingAssistantPrefs, setSavingAssistantPrefs] = useState(false);
 
   const company = user?.companyId ? getCompany(user.companyId) : null;
 
@@ -176,6 +183,14 @@ export function SettingsPage() {
   useEffect(() => {
     if (user && activeTab === 'company') {
       fetchDocuments();
+    }
+    if (user && activeTab === 'assistant') {
+      void getAssistantProfile()
+        .then((p) => {
+          setCoachingLevel(p.coachingLevel);
+          setCompetenceLevel(p.competenceLevel);
+        })
+        .catch(() => {});
     }
   }, [user, activeTab]);
 
@@ -737,9 +752,22 @@ export function SettingsPage() {
 
 
 
+  const handleSaveAssistantPrefs = async () => {
+    try {
+      setSavingAssistantPrefs(true);
+      await saveAssistantProfile({ coachingLevel, competenceLevel });
+      toast.success('Assistant preferences saved');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to save assistant preferences');
+    } finally {
+      setSavingAssistantPrefs(false);
+    }
+  };
+
   const tabs = [
     { id: 'profile', label: 'Profile', icon: <User className="w-4 h-4" /> },
     { id: 'company', label: 'Company', icon: <Building2 className="w-4 h-4" /> },
+    { id: 'assistant', label: 'Assistant', icon: <Bot className="w-4 h-4" /> },
     { id: 'notifications', label: 'Notifications', icon: <Bell className="w-4 h-4" /> },
     { id: 'payments', label: 'Payments', icon: <CreditCard className="w-4 h-4" /> },
     { id: 'subscription', label: 'Subscription', icon: <Shield className="w-4 h-4" /> },
@@ -1728,6 +1756,44 @@ export function SettingsPage() {
               </Card>
             )}
           </div>
+        </TabPanel>
+
+        <TabPanel id="assistant">
+          <Card>
+            <h3 className="section-title">heliOS Assistant</h3>
+            <p className="text-slate-400 text-sm mb-6">
+              Control how the assistant coaches you. Pro unlocks full RAG, quote context, and photo checks.
+            </p>
+            <div className="max-w-md space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Coaching style</label>
+                <select
+                  value={coachingLevel}
+                  onChange={(e) => setCoachingLevel(e.target.value as CoachingLevel)}
+                  className="input"
+                >
+                  <option value="concise">Concise — short bullet answers</option>
+                  <option value="balanced">Balanced — practical default</option>
+                  <option value="detailed">Detailed — step-by-step coaching</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Your experience level</label>
+                <select
+                  value={competenceLevel}
+                  onChange={(e) => setCompetenceLevel(e.target.value as CompetenceLevel)}
+                  className="input"
+                >
+                  <option value="beginner">Beginner — explain terms and safe defaults</option>
+                  <option value="intermediate">Intermediate — balanced technical depth</option>
+                  <option value="expert">Expert — direct, technical answers</option>
+                </select>
+              </div>
+              <Button onClick={() => void handleSaveAssistantPrefs()} isLoading={savingAssistantPrefs}>
+                Save assistant preferences
+              </Button>
+            </div>
+          </Card>
         </TabPanel>
       </TabPanels>
 

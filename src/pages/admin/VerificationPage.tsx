@@ -22,6 +22,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { format } from 'date-fns';
+import { queueQmsDocumentIndexing } from '../../services/assistant';
 import type { InstallerOnboardingDoc, OnboardingDocumentStatus } from '../../types';
 
 /** Admin-reviewed onboarding files (excludes consumer code selection). */
@@ -236,6 +237,12 @@ export function VerificationPage() {
         .eq('id', selectedDoc.id);
 
       if (error) throw error;
+
+      if (reviewAction === 'approve') {
+        void queueQmsDocumentIndexing(selectedDoc.id).catch(() => {
+          // Non-blocking — cron reindex will retry
+        });
+      }
 
       if (selectedCompany) {
         await syncCompanyOnboardingStatus(selectedCompany);

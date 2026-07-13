@@ -21,6 +21,8 @@ import { UsersPage } from './pages/admin/UsersPage';
 import { ProductsAdminPage } from './pages/admin/ProductsAdminPage';
 import { AdminQuotesPage } from './pages/admin/AdminQuotesPage';
 import { DocumentBankPage } from './pages/admin/DocumentBankPage';
+import { AssistantInsightsPage } from './pages/admin/AssistantInsightsPage';
+import { AssistantQuestionBankPage } from './pages/admin/AssistantQuestionBankPage';
 import { TemplatesPage } from './pages/admin/TemplatesPage';
 import { InvoicesPage } from './pages/admin/InvoicesPage';
 import { VerificationPage } from './pages/admin/VerificationPage';
@@ -73,6 +75,8 @@ function App() {
               <Route path="users" element={<UsersPage />} />
               <Route path="products" element={<ProductsAdminPage />} />
               <Route path="documents" element={<DocumentBankPage />} />
+              <Route path="assistant" element={<AssistantInsightsPage />} />
+              <Route path="assistant/questions" element={<AssistantQuestionBankPage />} />
               <Route path="templates" element={<TemplatesPage />} />
               <Route path="verification" element={<VerificationPage />} />
               <Route path="invoices" element={<InvoicesPage />} />

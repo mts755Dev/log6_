@@ -241,9 +241,43 @@ curl -i --location --request POST 'http://localhost:54321/functions/v1/create-en
   }'
 ```
 
-## Notes
+### AI Assistant
 
-- Email sending is non-blocking - if it fails, the engineer is still created
+```bash
+npx supabase functions deploy ai-chat
+npx supabase functions deploy index-document
+npx supabase functions deploy index-qms-document
+npx supabase functions deploy assistant-feedback
+npx supabase functions deploy reindex-stale-documents
+```
+
+Secrets for assistant:
+
+```bash
+supabase secrets set LLM_API_KEY=your_key
+supabase secrets set LLM_API_URL=https://api.openai.com/v1/chat/completions
+supabase secrets set AI_CHAT_MODEL_FREE=gpt-4o-mini
+supabase secrets set AI_CHAT_MODEL_PRO=gpt-4o
+supabase secrets set AI_CHAT_MODEL_DEFAULT=gpt-4o-mini
+supabase secrets set AI_CHAT_MODEL_VISION=gpt-4o-mini
+supabase secrets set AI_EMBEDDING_MODEL=text-embedding-3-small
+supabase secrets set AI_FREE_DAILY_LIMIT=15
+supabase secrets set AI_PRO_DAILY_LIMIT=200
+supabase secrets set AI_REINDEX_STALE_DAYS=7
+supabase secrets set PINECONE_API_KEY=your_key
+supabase secrets set PINECONE_HOST=your-index-host.pinecone.io
+supabase secrets set CRON_SECRET=your_cron_secret
+```
+
+Schedule stale reindex (Supabase cron or external):
+
+```bash
+curl -X POST "https://YOUR_PROJECT.supabase.co/functions/v1/reindex-stale-documents" \
+  -H "x-cron-secret: your_cron_secret"
+```
+
+Run migration `supabase/migrations/20260624120000_assistant_tables.sql` in Supabase SQL editor before using the assistant.
+
 - The function requires authentication (installer must be logged in)
 - Engineers are automatically assigned to the installer's company
 - Password must be at least 6 characters

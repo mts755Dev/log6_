@@ -89,6 +89,11 @@ The platform comes with pre-seeded demo accounts for testing:
 
 Simply enter the email and click "Try Demo Account" to log in.
 
+## Documentation
+
+- **[Chatbot Architecture & Phased Delivery](docs/CHATBOT_ARCHITECTURE.md)** — Lane system, tech stack, Phase 1–5 deliverables, API pipeline, data model.
+- **[AI Assistant Architecture & Flowcharts](docs/AI_ASSISTANT_ARCHITECTURE.md)** — Platform flow, RAG design, admin Document Bank → retrieval pipeline, and Mermaid diagrams.
+
 ## Project Structure
 
 ```
