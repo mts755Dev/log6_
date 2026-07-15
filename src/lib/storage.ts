@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { compressForUpload } from './compressUpload';
 
 // Use the unified 'documents' bucket for all document uploads
 export const STORAGE_BUCKET = 'documents';
@@ -18,7 +19,7 @@ export async function uploadDocument(
   documentType: string,
   version: number = 1,
   companyId?: string
-): Promise<string> {
+): Promise<{ path: string; file: File }> {
   try {
     // Get company_id from profile if not provided
     let finalCompanyId = companyId;
@@ -32,14 +33,16 @@ export async function uploadDocument(
       finalCompanyId = profile?.company_id || userId; // Fallback to userId for safety
     }
 
+    const { file: uploadFile } = await compressForUpload(file);
+
     // Create a unique file path with company structure
-    const fileExt = file.name.split('.').pop();
+    const fileExt = uploadFile.name.split('.').pop();
     const fileName = `onboarding/${finalCompanyId}/${documentType}/${Date.now()}_v${version}.${fileExt}`;
 
     // Upload file to Supabase Storage
     const { data, error } = await supabase.storage
       .from(STORAGE_BUCKET)
-      .upload(fileName, file, {
+      .upload(fileName, uploadFile, {
         cacheControl: '3600',
         upsert: true, // Allow overwriting if exists
       });
@@ -49,7 +52,7 @@ export async function uploadDocument(
       throw new Error(`Failed to upload ${documentType}: ${error.message}`);
     }
 
-    return data.path;
+    return { path: data.path, file: uploadFile };
   } catch (error) {
     console.error('Upload document error:', error);
     throw error;
@@ -244,9 +247,15 @@ export async function uploadDocumentGroup(
 ): Promise<void> {
   for (const file of files) {
     const version = await getNextDocumentVersion(userId, documentType);
-    const filePath = await uploadDocument(file, userId, documentType, version, companyId);
+    const { path: filePath, file: uploaded } = await uploadDocument(
+      file,
+      userId,
+      documentType,
+      version,
+      companyId
+    );
     await saveDocumentMetadata(
-      userId, documentType, file.name, filePath, file.size, version,
+      userId, documentType, uploaded.name, filePath, uploaded.size, version,
       issuedDate, expiryDate, companyId
     );
   }
@@ -262,12 +271,13 @@ export async function uploadNTPDocument(
   ntpId: string,
   docType: 'id_document' | 'qualification_card'
 ): Promise<string> {
-  const fileExt = file.name.split('.').pop();
+  const { file: uploadFile } = await compressForUpload(file);
+  const fileExt = uploadFile.name.split('.').pop();
   const fileName = `ntp/${companyId}/${ntpId}/${docType}_${Date.now()}.${fileExt}`;
 
   const { data, error } = await supabase.storage
     .from(STORAGE_BUCKET)
-    .upload(fileName, file, { cacheControl: '3600', upsert: true });
+    .upload(fileName, uploadFile, { cacheControl: '3600', upsert: true });
 
   if (error) {
     throw new Error(`Failed to upload NTP ${docType}: ${error.message}`);

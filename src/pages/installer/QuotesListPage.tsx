@@ -20,13 +20,14 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { format } from 'date-fns';
 import { supabase } from '../../lib/supabase';
-import { generateAllProposalPdfs } from '../../services/proposalPdfGenerator';
+import { createLivingDocumentsForQuote } from '../../lib/livingDocuments';
+import { validateQuoteForDocumentGeneration } from '../../lib/quoteDocumentValidation';
 
 export function QuotesListPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const { user } = useAuth();
-  const { quotes, deleteQuote, updateQuote, canCreateQuote, deductQuoteCredit, refreshData } = useData();
+  const { quotes, deleteQuote, updateQuote, canCreateQuote, deductQuoteCredit, refreshData, getCompany } = useData();
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('all');
   const [isLoading, setIsLoading] = useState(true);
@@ -84,42 +85,35 @@ export function QuotesListPage() {
         return;
       }
 
-      toast.info('Generating proposal pack...', 3000);
-
-      // 🎯 STEP 1: Generate all proposal PDFs
-      const pdfResult = await generateAllProposalPdfs(quote, user.companyId);
-      
-      if (!pdfResult.success) {
-        console.error('PDF generation errors:', pdfResult.errors);
-        toast.error('Some PDFs failed to generate, but continuing...');
+      const missing = validateQuoteForDocumentGeneration({
+        customer: quote.customer,
+        lineItems: quote.lineItems || [],
+        installerName: quote.installerName,
+        companyInstallerSignature: user.companyId
+          ? getCompany(user.companyId)?.installerSignature || ''
+          : '',
+      });
+      if (missing.length) {
+        toast.error(
+          `Complete document details before generating: ${missing.slice(0, 3).join(', ')}${
+            missing.length > 3 ? '…' : ''
+          }`,
+        );
+        navigate(`/installer/quotes/${quoteId}/edit`);
+        return;
       }
 
-      // 🎯 STEP 2: Create document records for generated PDFs
-      for (const pdf of pdfResult.generatedPdfs) {
-        const { data: docData, error: docError } = await supabase
-          .from('documents')
-          .insert({
-            name: pdf.fileName,
-            description: `Auto-generated ${pdf.code} for quote ${quote.id.slice(0, 8)}`,
-            category: 'template',
-            file_url: pdf.fileUrl,
-            file_name: pdf.fileName,
-            version: 1,
-          })
-          .select()
-          .single();
+      toast.info('Preparing proposal pack...', 3000);
 
-        if (!docError && docData) {
-          await supabase
-            .from('quote_documents')
-            .insert({
-              quote_id: quoteId,
-              document_id: docData.id,
-            });
-        }
+      // Create living documents (PDF only after all roles finish)
+      const livingResult = await createLivingDocumentsForQuote(quote);
+
+      if (livingResult.errors.length) {
+        console.error('Living document errors:', livingResult.errors);
+        toast.warning('Some proposal documents could not be prepared');
       }
 
-      // 🎯 STEP 3: Auto-attach Document Bank documents
+      // Auto-attach Document Bank documents
       const { error: attachError } = await supabase.rpc('attach_documents_to_quote', {
         p_quote_id: quoteId
       });
@@ -152,8 +146,16 @@ export function QuotesListPage() {
 
       await refreshData();
 
-      const totalDocs = pdfResult.generatedPdfs.length + (attachError ? 0 : 2);
-      toast.success(`🎉 Quote sent with ${totalDocs} documents in proposal pack!`);
+      if (livingResult.created.length === 0) {
+        toast.warning(
+          livingResult.errors[0] ||
+            'Quote sent but no proposal documents were prepared. Add templates in Admin → Templates.',
+        );
+      } else {
+        toast.success(
+          `Quote sent with ${livingResult.created.length} live proposal document(s). PDF is generated after all roles finish.`,
+        );
+      }
       
     } catch (error) {
       console.error('Error sending quote:', error);
@@ -166,7 +168,7 @@ export function QuotesListPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="page-header mb-0">
-          <h1 className="page-title">My Quotes</h1>
+          <h1 className="page-title">My Battery Quotes</h1>
           <p className="page-subtitle">Manage and track your quotes</p>
         </div>
         <Link to="/installer/quotes/new" className="w-full sm:w-auto">

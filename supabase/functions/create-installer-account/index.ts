@@ -1,10 +1,92 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+async function hashLinkCode(raw: string): Promise<string> {
+  const data = new TextEncoder().encode(raw.trim());
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function completeSimpliHeatLinkForCompany(
+  supabase: SupabaseClient,
+  companyId: string,
+  linkCode: string,
+): Promise<{ linked: boolean; simpliheatUserId?: string; error?: string }> {
+  const trimmed = linkCode.trim();
+  if (!trimmed || !companyId) {
+    return { linked: false, error: 'missing_params' };
+  }
+
+  const linkHash = await hashLinkCode(trimmed);
+  const now = Date.now();
+
+  const { data: simpliheatProfile, error: simpliheatError } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('helios_link_code_hash', linkHash)
+    .gt('helios_link_code_expires', now)
+    .maybeSingle();
+
+  if (simpliheatError) {
+    console.error('simpliheat link lookup:', simpliheatError);
+    return { linked: false, error: simpliheatError.message };
+  }
+
+  if (!simpliheatProfile?.id) {
+    return { linked: false, error: 'invalid_or_expired_link' };
+  }
+
+  const simpliheatUserId = simpliheatProfile.id as string;
+
+  const { data: companyRow, error: companyReadError } = await supabase
+    .from('companies')
+    .select('simpliheat_user_id')
+    .eq('id', companyId)
+    .maybeSingle();
+
+  if (companyReadError) {
+    return { linked: false, error: companyReadError.message };
+  }
+
+  if (companyRow?.simpliheat_user_id && companyRow.simpliheat_user_id !== simpliheatUserId) {
+    return { linked: false, error: 'company_already_linked' };
+  }
+
+  const { error: companyUpdateError } = await supabase
+    .from('companies')
+    .update({ simpliheat_user_id: simpliheatUserId })
+    .eq('id', companyId);
+
+  if (companyUpdateError) {
+    return { linked: false, error: companyUpdateError.message };
+  }
+
+  const tokenHash = await hashLinkCode(`shk_${crypto.randomUUID()}_${now}_${simpliheatUserId}`);
+
+  const { error: simpliheatUpdateError } = await supabase
+    .from('profiles')
+    .update({
+      company_id: companyId,
+      helios_link_code_hash: null,
+      helios_link_code_expires: null,
+      helios_token_hash: tokenHash,
+      helios_token_created: now,
+    })
+    .eq('id', simpliheatUserId);
+
+  if (simpliheatUpdateError) {
+    return { linked: false, error: simpliheatUpdateError.message };
+  }
+
+  return { linked: true, simpliheatUserId };
+}
 
 type CreateInstallerAccountPayload = {
   email?: string;
@@ -13,6 +95,7 @@ type CreateInstallerAccountPayload = {
   phone?: string | null;
   companyName?: string | null;
   consumerCode?: string | null;
+  simpliheatLinkCode?: string | null;
 };
 
 function jsonResponse(body: Record<string, unknown>, status: number) {
@@ -171,6 +254,24 @@ serve(async (req) => {
       throw profileVerifyError ?? new Error('Failed to link company to installer profile');
     }
 
+    let simpliheatLinked = false;
+    let simpliheatUserId: string | null = null;
+    const linkCode = payload.simpliheatLinkCode?.trim();
+
+    if (linkCode) {
+      const linkResult = await completeSimpliHeatLinkForCompany(
+        supabase,
+        createdCompany.id,
+        linkCode,
+      );
+      if (linkResult.linked && linkResult.simpliheatUserId) {
+        simpliheatLinked = true;
+        simpliheatUserId = linkResult.simpliheatUserId;
+      } else {
+        console.warn('SimpliHeat link during signup failed:', linkResult.error);
+      }
+    }
+
     // Issue a session without calling client signUp (avoids auth email rate limits).
     let session: { access_token: string; refresh_token: string } | null = null;
     if (anonKey) {
@@ -196,6 +297,8 @@ serve(async (req) => {
       userId,
       companyId: createdCompany.id,
       session,
+      simpliheatLinked,
+      simpliheatUserId,
     }, 200);
   } catch (error: any) {
     console.error('create-installer-account error:', error);

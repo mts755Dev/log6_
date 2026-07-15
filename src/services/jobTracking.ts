@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { toDateInputValue } from '../lib/quoteDocumentValidation';
 import type { QuoteStatus } from '../types';
 
 /**
@@ -132,27 +133,109 @@ export async function completeInstallation(
 }
 
 /**
- * Mark commissioning as uploaded
+ * Mark commissioning as uploaded and stamp commissioning_date from this job stage.
  */
 export async function uploadCommissioning(
   quoteId: string,
   notes?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    const now = new Date().toISOString();
     const { error } = await supabase
       .from('quotes')
       .update({
         status: 'commissioning',
-        commissioning_uploaded_at: new Date().toISOString(),
+        commissioning_uploaded_at: now,
         commissioning_notes: notes || null,
       })
       .eq('id', quoteId);
 
     if (error) throw error;
 
+    await syncCommissioningDateFromJobStage(quoteId);
+
     return { success: true };
   } catch (error: any) {
     console.error('Error uploading commissioning:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Copy the commissioning stage timestamp onto quote documentDetails + living-doc responses
+ * so templates get {{commissioning_date}} without installer typing it at quote time.
+ */
+export async function syncCommissioningDateFromJobStage(
+  quoteId: string,
+): Promise<{ success: boolean; date?: string; error?: string }> {
+  try {
+    const { data: quote, error: fetchError } = await supabase
+      .from('quotes')
+      .select('customer, commissioning_uploaded_at')
+      .eq('id', quoteId)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    const atIso = quote.commissioning_uploaded_at || new Date().toISOString();
+    const stamp = toDateInputValue(atIso) || atIso.slice(0, 10);
+
+    const customerRaw =
+      quote.customer && typeof quote.customer === 'object'
+        ? (quote.customer as Record<string, unknown>)
+        : {};
+    const existingDetails =
+      customerRaw.documentDetails && typeof customerRaw.documentDetails === 'object'
+        ? (customerRaw.documentDetails as Record<string, unknown>)
+        : {};
+
+    const customer = {
+      ...customerRaw,
+      documentDetails: {
+        ...existingDetails,
+        commissioningDate: stamp,
+      },
+    };
+
+    const patch: Record<string, unknown> = { customer };
+    if (!quote.commissioning_uploaded_at) {
+      patch.commissioning_uploaded_at = atIso;
+    }
+
+    const { error: updateError } = await supabase
+      .from('quotes')
+      .update(patch)
+      .eq('id', quoteId);
+
+    if (updateError) throw updateError;
+
+    const { data: livingDocs } = await supabase
+      .from('quote_living_documents')
+      .select('id, responses')
+      .eq('quote_id', quoteId);
+
+    if (livingDocs?.length) {
+      await Promise.all(
+        livingDocs.map((doc) => {
+          const responses =
+            doc.responses && typeof doc.responses === 'object'
+              ? { ...(doc.responses as Record<string, unknown>) }
+              : {};
+          responses.commissioning_date = stamp;
+          return supabase
+            .from('quote_living_documents')
+            .update({
+              responses,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', doc.id);
+        }),
+      );
+    }
+
+    return { success: true, date: stamp };
+  } catch (error: any) {
+    console.error('Error syncing commissioning date from job stage:', error);
     return { success: false, error: error.message };
   }
 }

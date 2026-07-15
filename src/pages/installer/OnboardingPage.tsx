@@ -15,6 +15,7 @@ import { Card } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { DocumentUploadModal } from '../../components/onboarding/DocumentUploadModal';
 import { supabase } from '../../lib/supabase';
+import { compressForUpload } from '../../lib/compressUpload';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { format } from 'date-fns';
@@ -275,10 +276,11 @@ export function OnboardingPage() {
   ) => {
     if (!user?.companyId) return;
     try {
-      const fileExt = file.name.split('.').pop();
+      const { file: uploadFile } = await compressForUpload(file);
+      const fileExt = uploadFile.name.split('.').pop();
       const fileName = `onboarding/${user.companyId}/${type}/${Date.now()}.${fileExt}`;
 
-      const { error: uploadError } = await supabase.storage.from('documents').upload(fileName, file);
+      const { error: uploadError } = await supabase.storage.from('documents').upload(fileName, uploadFile);
       if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(fileName);
@@ -287,10 +289,10 @@ export function OnboardingPage() {
         company_id: user.companyId,
         uploaded_by: user.id,
         document_type: type,
-        file_name: file.name,
+        file_name: uploadFile.name,
         file_url: publicUrl,
-        file_size: file.size,
-        mime_type: file.type,
+        file_size: uploadFile.size,
+        mime_type: uploadFile.type || file.type,
         issued_date: metadata.issuedDate || null,
         expiry_date: metadata.expiryDate || null,
         reference_number: metadata.referenceNumber || null,

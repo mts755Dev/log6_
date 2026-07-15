@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate, useParams, Link } from 'react-router-dom';
+import { useNavigate, useParams, Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Mail, Lock, ArrowRight, Shield, Wrench, Users, Sun, Battery, Zap,
   User, Phone, Building2, FileText, ArrowLeft, CheckCircle2, Clock,
   ChevronDown, AlertTriangle, Circle,
 } from 'lucide-react';
+import { SimpliHeatConnectionBanner } from '../../components/auth/SimpliHeatConnectionBanner';
 import { Logo } from '../../components/ui/Logo';
+import { getStoredSimpliHeatLinkCode, storeSimpliHeatLinkCode, tryCompleteStoredSimpliHeatLinkWithRetry, clearStoredSimpliHeatLinkCode, markSimpliHeatLinkSuccess, hasPendingSimpliHeatLinkSuccess } from '../../lib/simpliheatLink';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { Select } from '../../components/ui/Select';
@@ -100,6 +102,8 @@ type InstallerSignupResult = {
   companyId?: string;
   company_id?: string;
   session?: { access_token: string; refresh_token: string };
+  simpliheatLinked?: boolean;
+  simpliheatUserId?: string;
   error?: string;
 };
 
@@ -130,6 +134,17 @@ function clearPendingSignupStorage() {
   sessionStorage.removeItem(PENDING_SIGNUP_STORAGE_KEY);
 }
 
+function buildInstallerLoginNavigateState(message: string, email: string) {
+  const simpliheatLinked = hasPendingSimpliHeatLinkSuccess();
+  const simpliheatFlow = simpliheatLinked || Boolean(getStoredSimpliHeatLinkCode());
+
+  return {
+    message,
+    email,
+    ...(simpliheatFlow ? { simpliheatFlow: true, simpliheatLinked } : {}),
+  };
+}
+
 async function parseInstallerSignupInvoke(
   accountResult: unknown,
   accountError: Error | null,
@@ -149,6 +164,7 @@ async function parseInstallerSignupInvoke(
 export function SignupPage() {
   const { role } = useParams<{ role: UserRole }>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [currentStep, setCurrentStep] = useState(0);
   const [formData, setFormData] = useState({
@@ -174,6 +190,7 @@ export function SignupPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [pendingSignup, setPendingSignup] = useState<PendingInstallerSignup | null>(null);
   const [signupCompleted, setSignupCompleted] = useState(false);
+  const [simpliHeatPending, setSimpliHeatPending] = useState(false);
 
   const pendingSignupRef = useRef<PendingInstallerSignup | null>(null);
   const signupCompletedRef = useRef(false);
@@ -188,6 +205,24 @@ export function SignupPage() {
       navigate('/signup/installer', { replace: true });
     }
   }, [role, navigate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const linkCode = params.get('simpliheat_link');
+
+    if (linkCode) {
+      storeSimpliHeatLinkCode(linkCode);
+      setSimpliHeatPending(true);
+      if (role !== 'installer') {
+        navigate('/signup/installer', { replace: true });
+      }
+      return;
+    }
+
+    if (getStoredSimpliHeatLinkCode()) {
+      setSimpliHeatPending(true);
+    }
+  }, [location.search, navigate, role]);
   const totalSteps = isInstaller ? 2 : 1;
 
   useEffect(() => {
@@ -216,6 +251,7 @@ export function SignupPage() {
   }, []);
 
   const createInstallerAccountOnStep1 = useCallback(async (): Promise<PendingInstallerSignup> => {
+    const simpliheatLinkCode = getStoredSimpliHeatLinkCode();
     const { data: accountResult, error: accountError } = await supabase.functions.invoke(
       'create-installer-account',
       {
@@ -225,6 +261,7 @@ export function SignupPage() {
           fullName: formData.fullName,
           phone: formData.phone || null,
           companyName: formData.companyName.trim(),
+          ...(simpliheatLinkCode ? { simpliheatLinkCode } : {}),
         },
       },
     );
@@ -241,6 +278,11 @@ export function SignupPage() {
         accountFailureMessage ||
           'Account creation failed. Deploy create-installer-account and try again.',
       );
+    }
+
+    if (accountPayload.simpliheatLinked) {
+      clearStoredSimpliHeatLinkCode();
+      markSimpliHeatLinkSuccess();
     }
 
     if (accountPayload.session?.access_token && accountPayload.session?.refresh_token) {
@@ -452,6 +494,12 @@ export function SignupPage() {
           const created = await createInstallerAccountOnStep1();
           setPendingSignup(created);
           pendingSignupRef.current = created;
+          if (getStoredSimpliHeatLinkCode()) {
+            const linked = await tryCompleteStoredSimpliHeatLinkWithRetry();
+            if (!linked) {
+              console.warn('SimpliHeat link will retry after sign-in');
+            }
+          }
           setCurrentStep(1);
         } catch (err: any) {
           console.error('Step 1 account creation error:', err);
@@ -564,9 +612,15 @@ export function SignupPage() {
           for (const group of groups) {
             for (const file of group.files) {
               const version = await getNextDocumentVersion(userId, dbType);
-              const filePath = await uploadDocument(file, userId, dbType, version, companyId);
+              const { path: filePath, file: uploaded } = await uploadDocument(
+                file,
+                userId,
+                dbType,
+                version,
+                companyId
+              );
               await saveDocumentMetadata(
-                userId, dbType, file.name, filePath, file.size, version,
+                userId, dbType, uploaded.name, filePath, uploaded.size, version,
                 group.issuedDate || undefined, group.expiryDate || undefined,
                 companyId,
               );
@@ -579,8 +633,24 @@ export function SignupPage() {
           for (const group of docGroups.wasteLicense) {
             for (const file of group.files) {
               const version = await getNextDocumentVersion(userId, 'waste_carrier_license');
-              const filePath = await uploadDocument(file, userId, 'waste_carrier_license', version, companyId);
-              await saveDocumentMetadata(userId, 'waste_carrier_license', file.name, filePath, file.size, version, undefined, undefined, companyId);
+              const { path: filePath, file: uploaded } = await uploadDocument(
+                file,
+                userId,
+                'waste_carrier_license',
+                version,
+                companyId
+              );
+              await saveDocumentMetadata(
+                userId,
+                'waste_carrier_license',
+                uploaded.name,
+                filePath,
+                uploaded.size,
+                version,
+                undefined,
+                undefined,
+                companyId
+              );
             }
           }
         }
@@ -595,15 +665,20 @@ export function SignupPage() {
         signupCompletedRef.current = true;
         setSignupCompleted(true);
         clearPendingSignupStorage();
+
+        if (getStoredSimpliHeatLinkCode()) {
+          await tryCompleteStoredSimpliHeatLinkWithRetry();
+        }
+
         await supabase.auth.signOut();
 
         navigate(`/login/${currentRole}`, {
-          state: {
-            message: hasDeferredDocuments
+          state: buildInstallerLoginNavigateState(
+            hasDeferredDocuments
               ? 'Account created! Please sign in and upload remaining documents from the Onboarding page.'
               : 'Account created successfully! Please sign in.',
-            email: formData.email,
-          },
+            formData.email,
+          ),
         });
         setIsLoading(false);
       } catch (uploadError: any) {
@@ -615,7 +690,10 @@ export function SignupPage() {
         setIsLoading(false);
         setTimeout(() => {
           navigate(`/login/${currentRole}`, {
-            state: { message: 'Account created. Please sign in and upload documents.', email: formData.email },
+            state: buildInstallerLoginNavigateState(
+              'Account created. Please sign in and upload documents.',
+              formData.email,
+            ),
           });
         }, 5000);
         return;
@@ -852,6 +930,8 @@ export function SignupPage() {
 
           <h2 className="text-2xl font-bold font-display text-white mb-1 flex-shrink-0">Create your account</h2>
           <p className="text-slate-400 mb-6 text-sm flex-shrink-0">Get started with your {currentRole} account</p>
+
+          {isInstaller && simpliHeatPending && <SimpliHeatConnectionBanner variant="signup" />}
 
           {renderStepIndicator()}
 

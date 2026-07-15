@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { tryCompleteStoredSimpliHeatLinkWithRetry } from '../lib/simpliheatLink';
 import type { User as SupabaseUser, Session } from '@supabase/supabase-js';
 import type { User, UserRole } from '../types';
 
@@ -311,6 +312,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
         
         console.log('✅ User mapped:', mappedUser.email, 'role:', mappedUser.role);
+
+        if (expectedRole === 'installer') {
+          await tryCompleteStoredSimpliHeatLinkWithRetry();
+        }
+
         setUser(mappedUser);
         
         return true;

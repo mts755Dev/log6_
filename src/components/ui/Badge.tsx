@@ -85,3 +85,17 @@ export function SubscriptionBadge({ status }: { status: string }) {
 
   return <Badge variant={config.variant}>{config.label}</Badge>;
 }
+
+export function ProjectStatusBadge({ status }: { status: string }) {
+  const statusConfig: Record<string, { variant: BadgeProps['variant']; label: string }> = {
+    draft: { variant: 'slate', label: 'Draft' },
+    active: { variant: 'primary', label: 'Active' },
+    on_hold: { variant: 'warning', label: 'On Hold' },
+    completed: { variant: 'success', label: 'Completed' },
+    cancelled: { variant: 'danger', label: 'Cancelled' },
+  };
+
+  const config = statusConfig[status] || { variant: 'slate' as const, label: status.replace(/_/g, ' ') };
+
+  return <Badge variant={config.variant}>{config.label}</Badge>;
+}

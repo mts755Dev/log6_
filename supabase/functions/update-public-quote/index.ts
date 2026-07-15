@@ -79,27 +79,32 @@ serve(async (req) => {
       }
 
       const { customerName, customerSignature, stripePaymentIntentId } = payload || {};
-      if (!customerName || !customerSignature || !stripePaymentIntentId) {
+      if (!customerName || !stripePaymentIntentId) {
         return new Response(
-          JSON.stringify({ error: 'customerName, customerSignature and stripePaymentIntentId are required' }),
+          JSON.stringify({ error: 'customerName and stripePaymentIntentId are required' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
+      const updatePayload: Record<string, unknown> = {
+        status: 'deposit_paid',
+        deposit_paid: true,
+        deposit_paid_at: new Date().toISOString(),
+        accepted_at: new Date().toISOString(),
+        stripe_payment_intent_id: stripePaymentIntentId,
+        customer: {
+          ...(quote.customer || {}),
+          name: customerName,
+        },
+      };
+      // Signature comes from the live proposal form when the customer already signed there.
+      if (customerSignature) {
+        updatePayload.customer_signature = customerSignature;
+      }
+
       const { error } = await supabase
         .from('quotes')
-        .update({
-          status: 'deposit_paid',
-          deposit_paid: true,
-          deposit_paid_at: new Date().toISOString(),
-          accepted_at: new Date().toISOString(),
-          customer_signature: customerSignature,
-          stripe_payment_intent_id: stripePaymentIntentId,
-          customer: {
-            ...(quote.customer || {}),
-            name: customerName,
-          },
-        })
+        .update(updatePayload)
         .eq('id', quoteId)
         .eq('share_token', token);
 

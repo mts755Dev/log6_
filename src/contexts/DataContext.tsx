@@ -199,6 +199,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           stripeConnectPayoutsEnabled: c.stripe_connect_payouts_enabled,
           logo: c.logo,
           brandColor: c.brand_color,
+          installerSignature: c.installer_signature || undefined,
           createdAt: c.created_at,
         }));
         setCompanies(mappedCompanies);
@@ -546,17 +547,21 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const updateCompany = useCallback(async (id: string, updates: Partial<Company>) => {
     try {
+      const updateData: Record<string, unknown> = {};
+      if (updates.name !== undefined) updateData.name = updates.name;
+      if (updates.email !== undefined) updateData.email = updates.email;
+      if (updates.phone !== undefined) updateData.phone = updates.phone;
+      if (updates.address !== undefined) updateData.address = updates.address;
+      if (updates.postcode !== undefined) updateData.postcode = updates.postcode;
+      if (updates.logo !== undefined) updateData.logo = updates.logo;
+      if (updates.brandColor !== undefined) updateData.brand_color = updates.brandColor;
+      if (updates.installerSignature !== undefined) {
+        updateData.installer_signature = updates.installerSignature || null;
+      }
+
       const { error } = await supabase
         .from('companies')
-        .update({
-          name: updates.name,
-          email: updates.email,
-          phone: updates.phone,
-          address: updates.address,
-          logo: updates.logo,
-          brand_color: updates.brandColor,
-          // Add other fields as needed
-        })
+        .update(updateData)
         .eq('id', id);
 
       if (error) throw error;

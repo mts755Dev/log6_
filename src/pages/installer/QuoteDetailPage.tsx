@@ -35,7 +35,6 @@ import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { generateQuotePDF } from '../../services/pdfGenerator';
-import { generateAllProposalPdfs } from '../../services/proposalPdfGenerator';
 import { sendQuoteToCustomer, openQuoteInEmailClient } from '../../services/emailNotifications';
 import { format } from 'date-fns';
 import { supabase } from '../../lib/supabase';
@@ -405,6 +404,13 @@ export function QuoteDetailPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          <Button
+            variant="secondary"
+            leftIcon={<FileText className="w-4 h-4" />}
+            onClick={() => navigate(`/installer/documents/${quote.id}`)}
+          >
+            Living documents
+          </Button>
           {quote.status === 'draft' && (
             <>
               <Button 
@@ -917,18 +923,19 @@ export function QuoteDetailPage() {
         </div>
       </div>
 
-      {/* Generating Documents Modal */}
+      {/* Preparing living documents modal */}
       <Modal
         isOpen={showGeneratingModal}
-        onClose={() => {}} // Prevent closing while generating
-        title="Generating Documents"
+        onClose={() => {}} // Prevent closing while preparing
+        title="Preparing proposal pack"
         size="sm"
       >
         <div className="flex flex-col items-center justify-center py-8 space-y-4">
           <Loader2 className="w-12 h-12 text-primary-500 animate-spin" />
-          <p className="text-slate-300 font-medium">Waiting for generating documents...</p>
+          <p className="text-slate-300 font-medium">Setting up live documents…</p>
           <p className="text-sm text-slate-500 text-center">
-            We're preparing your proposal pack and generating all necessary PDFs. This may take a few moments.
+            We’re attaching your proposal forms for the customer, engineer, and compliance to complete.
+            PDFs are created only after every required role finishes.
           </p>
         </div>
       </Modal>

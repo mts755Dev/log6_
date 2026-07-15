@@ -1,6 +1,11 @@
 // @ts-nocheck - PDF generator with template variables
 import { supabase } from '../lib/supabase';
-import { generatePDFFromHTML } from '../utils/pdfGenerator';
+import { generatePDFFromHTML, mergeTemplate } from '../utils/pdfGenerator';
+import {
+  formatUkDate,
+  getDocumentDetails,
+} from '../lib/quoteDocumentValidation';
+import { applyLiveMergeAttributes, quoteTechnologiesFromQuote, resolveTemplateTechnologies, templateMatchesQuoteTechnologies } from '../lib/templateBuilder';
 import type { Quote } from '../types';
 
 interface PdfGenerationResult {
@@ -10,290 +15,544 @@ interface PdfGenerationResult {
   error?: string;
 }
 
-/**
- * Generate FO7A - Covering Letter PDF
- */
-export async function generateCoveringLetterPdf(
-  quote: Quote,
-  companyData: any
-): Promise<PdfGenerationResult> {
-  try {
-    // Fetch template
-    const { data: template, error: templateError } = await supabase
-      .from('document_templates')
-      .select('*')
-      .eq('code', 'FO7A')
-      .single();
+interface DbTemplate {
+  id: string;
+  code: string;
+  name: string;
+  html_content: string;
+  css_styles?: string | null;
+}
 
-    if (templateError || !template) {
-      throw new Error('FO7A template not found');
+interface LineItemMergeRow {
+  description: string;
+  quantity: string;
+  unit_price: string;
+  total: string;
+}
+
+function buildFullAddress(address: string, postcode?: string): string {
+  return [address, postcode].map((p) => (p || '').trim()).filter(Boolean).join(', ');
+}
+
+function formatMoney(amount: number): string {
+  return `£${amount.toFixed(2)}`;
+}
+
+/**
+ * Build merge fields for any admin template (template builder or legacy HTML).
+ */
+export function buildQuoteMergeData(
+  quote: Quote,
+  companyData: Record<string, unknown>,
+): Record<string, unknown> {
+  const batteryCapacity = getBatteryCapacity(quote);
+  const batteryCapacityLabels = formatBatteryCapacity(batteryCapacity, quote);
+  const estimatedSavings = calculateEstimatedSavings(batteryCapacity || 10);
+  const depositPercentage =
+    quote.total > 0 ? Math.round((quote.deposit / quote.total) * 100) : 0;
+
+  const companyEmail =
+    (companyData.contactEmail as string) ||
+    (companyData.contact_email as string) ||
+    (companyData.email as string) ||
+    '';
+  const companyPhone =
+    (companyData.contactPhone as string) ||
+    (companyData.contact_phone as string) ||
+    (companyData.phone as string) ||
+    '';
+
+  const formattedDate = new Date().toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  });
+
+  const shortRef = quote.reference || quote.id.slice(0, 8).toUpperCase();
+  const details = getDocumentDetails(quote.customer);
+  const customerAddress = buildFullAddress(
+    quote.customer.address,
+    quote.customer.postcode,
+  );
+  const siteAddress = (details.siteAddress || '').trim() || customerAddress;
+
+  const designerName = (details.designerName || '').trim() || quote.installerName || '';
+  const technicalOp = (details.technicalOpName || '').trim() || quote.installerName || '';
+  const surveyorName = (details.surveyorName || '').trim() || quote.installerName || '';
+
+  const installDate =
+    formatUkDate(details.installDate) ||
+    formatUkDate(quote.installationDate) ||
+    '';
+  const commissioningDate =
+    formatUkDate(details.commissioningDate) ||
+    formatUkDate(quote.commissioningUploadedAt) ||
+    '';
+  const surveyDate = formatUkDate(details.surveyDate);
+  const handoverDate = formatUkDate(details.handoverDate);
+
+  const inverterItem = (quote.lineItems || []).find((item) => item.type === 'inverter');
+  const pvSystemSize = quote.customer.solarCapacityKwp
+    ? `${quote.customer.solarCapacityKwp} kWp`
+    : '';
+
+  const lineItems: LineItemMergeRow[] = (quote.lineItems || []).map((item) => {
+    const lineTotal = item.unitPrice * item.quantity;
+    return {
+      description: item.description,
+      quantity: String(item.quantity),
+      unit_price: formatMoney(item.unitPrice),
+      total: formatMoney(lineTotal),
+    };
+  });
+
+  return {
+    current_date: formattedDate,
+    contract_date: formattedDate,
+    report_date: new Date().toLocaleDateString('en-GB'),
+
+    customer_name: quote.customer.name,
+    customer_email: quote.customer.email,
+    customer_phone: quote.customer.phone || '',
+    customer_address: customerAddress,
+    site_address: siteAddress,
+    installation_address: siteAddress,
+
+    designer_name: designerName,
+    technical_op: technicalOp,
+    surveyor_name: surveyorName,
+
+    install_date: installDate,
+    commissioning_date: commissioningDate,
+    survey_date: surveyDate,
+    handover_date: handoverDate,
+
+    pv_system_size: pvSystemSize,
+    pv_panel_count: details.pvPanelCount || '',
+    pv_panel_model: details.pvPanelModel || '',
+    pv_inverter: inverterItem?.description || '',
+    pv_annual_yield: details.pvAnnualYield || '',
+
+    hp_model: '',
+    hp_output: '',
+    hp_flow_temp: '',
+    hp_heat_loss: '',
+    hp_scop: '',
+
+    quote_reference: shortRef,
+    quote_id: quote.id,
+
+    company_name: (companyData.name as string) || 'Your Company',
+    // Legacy templates may still contain {{company_logo}}. Prefer the baked
+    // letterhead from the builder; this only fills leftover merge tags.
+    company_logo: `${typeof window !== 'undefined' ? window.location.origin : ''}/assets/Main heliOS Logo.png`,
+    company_email: companyEmail,
+    company_phone: companyPhone,
+    company_address: (companyData.address as string) || '',
+    company_website: (companyData.website as string) || '',
+    company_contact: [companyEmail, companyPhone].filter(Boolean).join(' | '),
+    company_registration:
+      (companyData.registrationNumber as string) ||
+      (companyData.registration_number as string) ||
+      'N/A',
+
+    installer_name: quote.installerName || '',
+    // Quote override first, then saved company signature.
+    installer_signature:
+      details.installerSignature ||
+      (companyData.installer_signature as string) ||
+      (companyData.installerSignature as string) ||
+      '',
+
+    battery_capacity: batteryCapacityLabels.raw,
+    battery_capacity_kwh: batteryCapacityLabels.labelled,
+
+    quote_total: formatMoney(quote.total),
+    total_price: formatMoney(quote.total),
+    total: formatMoney(quote.total),
+    subtotal: formatMoney(quote.subtotal),
+    vat: formatMoney(quote.vatAmount),
+    vat_amount: formatMoney(quote.vatAmount),
+    vat_rate: `${quote.vatRate}`,
+
+    deposit_amount: formatMoney(quote.deposit),
+    deposit_percentage: `${depositPercentage}%`,
+    final_balance: formatMoney(quote.total - quote.deposit),
+    balance_amount: formatMoney(quote.total - quote.deposit),
+
+    system_description: generateSystemSummary(quote),
+    payment_method: 'Bank Transfer / Card Payment',
+    warranty_period: '10 years',
+    completion_timeframe: '4-6 weeks from deposit payment',
+
+    estimated_cycles_per_year: '250',
+    estimated_annual_savings: formatMoney(estimatedSavings.annual),
+    estimated_monthly_savings: formatMoney(estimatedSavings.monthly),
+    payback_period: `${estimatedSavings.paybackYears} years`,
+    system_lifetime: '25 years',
+    total_lifetime_savings: formatMoney(estimatedSavings.lifetime),
+    co2_reduction: `${(batteryCapacity * 0.5 * 250).toFixed(0)} kg/year`,
+    system_efficiency: '95%',
+
+    valid_until: quote.validUntil
+      ? new Date(quote.validUntil).toLocaleDateString('en-GB')
+      : 'N/A',
+
+    customer_signature: quote.customerSignature
+      ? `<img src="${quote.customerSignature}" alt="Customer signature" style="max-height:48px;max-width:220px;" />`
+      : quote.customer.name || '',
+
+    line_items: lineItems,
+
+    ...(details.customFields && typeof details.customFields === 'object'
+      ? details.customFields
+      : {}),
+  };
+}
+
+/**
+ * Older builder exports put `{{technical_op}}` (or another role) inside the
+ * signature pad instead of an `<img src="{{installer_signature}}">`.
+ * Rewrite those pads before merge so the handwritten signature can land.
+ */
+function rewriteLegacyInstallerSignaturePads(html: string): string {
+  if (typeof DOMParser === 'undefined') return html;
+
+  const ROLE_TAGS = [
+    '{{technical_op}}',
+    '{{designer_name}}',
+    '{{surveyor_name}}',
+    '{{installer_name}}',
+  ];
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div id="root">${html}</div>`, 'text/html');
+  const root = doc.getElementById('root');
+  if (!root) return html;
+
+  root.querySelectorAll('div').forEach((el) => {
+    const style = (el.getAttribute('style') || '').toLowerCase();
+    const looksLikePad =
+      style.includes('height') &&
+      style.includes('border') &&
+      style.includes('overflow') &&
+      !style.includes('border-bottom') &&
+      !style.includes('dashed');
+    if (!looksLikePad) return;
+
+    if (el.querySelector('img[src*="installer_signature"], img[alt="Installer signature"]')) {
+      return;
     }
 
-    // Calculate battery capacity
-    const batteryCapacity = getBatteryCapacity(quote);
-    
-    // Prepare merge data
-    const mergeData = {
-      current_date: new Date().toLocaleDateString('en-GB', { 
-        day: '2-digit', 
-        month: 'long', 
-        year: 'numeric' 
+    const raw = (el.innerHTML || '').replace(/\s+/g, ' ').trim();
+    const hasRolePlaceholder = ROLE_TAGS.some((tag) => raw.includes(tag));
+    // Pad that only holds a role merge (or is empty aside from chrome spans)
+    const onlyRoleOrEmpty =
+      hasRolePlaceholder ||
+      !raw ||
+      /^<span[^>]*>\s*<\/span>$/i.test(raw);
+
+    if (!onlyRoleOrEmpty && !hasRolePlaceholder) return;
+
+    Array.from(el.childNodes).forEach((child) => {
+      if (!(child instanceof HTMLElement)) {
+        child.textContent = '';
+        return;
+      }
+      const childStyle = (child.getAttribute('style') || '').toLowerCase();
+      if (childStyle.includes('position: absolute') || childStyle.includes('position:absolute')) {
+        return;
+      }
+      child.remove();
+    });
+
+    const img = doc.createElement('img');
+    img.setAttribute('src', '{{installer_signature}}');
+    img.setAttribute('alt', 'Installer signature');
+    img.setAttribute(
+      'style',
+      'max-height:40px;max-width:92%;object-fit:contain;display:block;',
+    );
+    el.insertBefore(img, el.firstChild);
+  });
+
+  return root.innerHTML;
+}
+
+/**
+ * Place the drawn installer signature into the PDF HTML.
+ * Handles <img src="{{installer_signature}}">, placeholder gifs, and older
+ * pads that still print the technician name.
+ */
+function injectInstallerSignatureImage(
+  html: string,
+  signatureDataUrl: string,
+  fallbackName: string,
+): string {
+  if (!signatureDataUrl?.trim() || typeof DOMParser === 'undefined') return html;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div id="root">${html}</div>`, 'text/html');
+  const root = doc.getElementById('root');
+  if (!root) return html;
+
+  const PLACEHOLDER_GIF = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP';
+
+  const makeImg = () => {
+    const img = doc.createElement('img');
+    img.setAttribute('src', signatureDataUrl);
+    img.setAttribute('alt', 'Installer signature');
+    img.setAttribute(
+      'style',
+      'max-height:48px;max-width:220px;object-fit:contain;display:block;',
+    );
+    return img;
+  };
+
+  const fillPad = (el: Element) => {
+    // Keep absolute chrome (e.g. position:absolute tags) but replace pad content.
+    Array.from(el.childNodes).forEach((child) => {
+      if (child.nodeType === Node.TEXT_NODE) {
+        child.textContent = '';
+        return;
+      }
+      if (!(child instanceof HTMLElement)) return;
+      const childStyle = (child.getAttribute('style') || '').toLowerCase();
+      if (childStyle.includes('position: absolute') || childStyle.includes('position:absolute')) {
+        return;
+      }
+      child.remove();
+    });
+    el.insertBefore(makeImg(), el.firstChild);
+  };
+
+  // 1) <img src="{{installer_signature}}"> / empty src / tiny placeholder gif
+  root.querySelectorAll('img').forEach((img) => {
+    const src = (img.getAttribute('src') || '').trim();
+    const alt = (img.getAttribute('alt') || '').toLowerCase();
+    if (
+      alt.includes('installer signature') ||
+      src.includes('{{installer_signature}}') ||
+      src.startsWith(PLACEHOLDER_GIF) ||
+      (alt.includes('signature') && (!src || src === 'undefined'))
+    ) {
+      img.setAttribute('src', signatureDataUrl);
+      img.setAttribute('alt', 'Installer signature');
+      img.setAttribute(
+        'style',
+        'max-height:48px;max-width:220px;object-fit:contain;display:block;',
+      );
+      // Remove sibling builder hint text inside the pad so only the signature shows
+      const pad = img.parentElement;
+      if (pad) {
+        Array.from(pad.childNodes).forEach((child) => {
+          if (child === img) return;
+          if (child.nodeType === Node.TEXT_NODE) {
+            child.textContent = '';
+            return;
+          }
+          if (!(child instanceof HTMLElement)) return;
+          const childStyle = (child.getAttribute('style') || '').toLowerCase();
+          if (childStyle.includes('position: absolute') || childStyle.includes('position:absolute')) {
+            return;
+          }
+          if (child.tagName === 'IMG') return;
+          child.remove();
+        });
+      }
+    }
+  });
+
+  // 2) Text placeholders left by older exports
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  let node: Node | null = walker.nextNode();
+  while (node) {
+    textNodes.push(node as Text);
+    node = walker.nextNode();
+  }
+  textNodes.forEach((textNode) => {
+    const value = textNode.nodeValue || '';
+    if (!value.includes('{{installer_signature}}')) return;
+    if (value.trim() === '{{installer_signature}}') {
+      textNode.parentElement?.replaceChild(makeImg(), textNode);
+      return;
+    }
+    textNode.nodeValue = value.replace(/\{\{installer_signature\}\}/g, '');
+    textNode.parentElement?.insertBefore(makeImg(), textNode.nextSibling);
+  });
+
+  // 3) Signature pad boxes (bordered + fixed height) that still show a name / placeholder
+  const name = fallbackName.trim().toLowerCase();
+  root.querySelectorAll('div').forEach((el) => {
+    if (el.querySelector('img[src^="data:image/png"]')) return;
+    const style = (el.getAttribute('style') || '').toLowerCase();
+    const looksLikePad =
+      style.includes('height') &&
+      style.includes('border') &&
+      style.includes('overflow') &&
+      !style.includes('border-bottom') &&
+      !style.includes('dashed');
+    if (!looksLikePad) return;
+
+    const text = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const emptyOrName =
+      !text ||
+      (name && text === name) ||
+      text === 'technical operative' ||
+      text === 'installer';
+    if (!emptyOrName) return;
+
+    fillPad(el);
+  });
+
+  return root.innerHTML;
+}
+
+/**
+ * If a template table has blank body rows, fill them from quote line items
+ * so product schedules are not empty in customer PDFs.
+ * Skips designed "spec" tables (System / Site / Battery linked-field layouts).
+ */
+export function injectLineItemsIntoEmptyTables(
+  html: string,
+  lineItems: LineItemMergeRow[],
+): string {
+  if (!lineItems.length || typeof DOMParser === 'undefined') return html;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div id="root">${html}</div>`, 'text/html');
+  const root = doc.getElementById('root');
+  if (!root) return html;
+
+  root.querySelectorAll('table').forEach((table) => {
+    const rows = Array.from(table.querySelectorAll('tr'));
+    if (rows.length < 2) return;
+
+    const headerCells = Array.from(rows[0].querySelectorAll('th,td'));
+    const colCount = headerCells.length || 3;
+    const bodyRows = rows.slice(1);
+
+    // Keep template tables that already have row labels / linked fields
+    const hasDesignedContent = bodyRows.some((row) => {
+      const cells = Array.from(row.querySelectorAll('td,th'));
+      return cells.some((cell) => {
+        const text = (cell.textContent || '').replace(/\u00a0/g, ' ').trim();
+        if (!text) return false;
+        if (/^\{\{[^}]+\}\}$/.test(text)) return true;
+        if (cell.querySelector('[data-tms-merge]')) return true;
+        const lower = text.toLowerCase();
+        return ['system', 'site', 'battery', 'inverter', 'pv'].includes(lower);
+      });
+    });
+    if (hasDesignedContent) return;
+
+    const allBlank = bodyRows.every((row) =>
+      Array.from(row.querySelectorAll('td,th')).every((cell) => {
+        const text = (cell.textContent || '').replace(/\u00a0/g, ' ').trim();
+        return !text;
       }),
-      customer_name: quote.customer.name,
-      customer_address: quote.customer.address,
-      quote_reference: quote.id.slice(0, 8).toUpperCase(),
-      company_name: companyData.name || 'Your Company',
-      company_logo: companyData.logo_url || '',
-      company_email: companyData.contactEmail || companyData.email || '',
-      company_phone: companyData.contactPhone || companyData.phone || '',
-      battery_capacity: `${batteryCapacity}`,
-      quote_total: `£${quote.total.toFixed(2)}`,
-      deposit_amount: `£${quote.deposit.toFixed(2)}`,
-      final_balance: `£${(quote.total - quote.deposit).toFixed(2)}`,
-      company_contact: `${companyData.contactEmail || companyData.email || ''} | ${companyData.contactPhone || companyData.phone || ''}`,
-    };
+    );
+    if (!allBlank) return;
 
-    // Generate PDF - merge template with data first
-    let mergedHtml = template.html_content;
-    Object.keys(mergeData).forEach(key => {
-      const regex = new RegExp(`{{${key}}}`, 'g');
-      mergedHtml = mergedHtml.replace(regex, String(mergeData[key] || ''));
+    bodyRows.forEach((row) => row.remove());
+
+    const tbody = table.querySelector('tbody') || table;
+    lineItems.forEach((item) => {
+      const tr = doc.createElement('tr');
+      const values =
+        colCount <= 2
+          ? [item.description, item.total]
+          : [item.description, `${item.quantity} × ${item.unit_price}`, item.total];
+
+      for (let i = 0; i < colCount; i += 1) {
+        const td = doc.createElement('td');
+        td.textContent = values[i] ?? '';
+        td.style.padding = '8px 10px';
+        td.style.borderBottom = '1px solid #e2e8f0';
+        td.style.fontSize = '13px';
+        td.style.color = '#1e293b';
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
     });
-    
-    const pdfBlob = await generatePDFFromHTML(mergedHtml, `FO7A-Covering-Letter-${quote.id}.pdf`);
+  });
 
-    // Upload to Supabase Storage
-    const fileName = `proposals/${quote.id}/FO7A-Covering-Letter-${Date.now()}.pdf`;
-    const { error: uploadError } = await supabase.storage
-      .from('documents')
-      .upload(fileName, pdfBlob, {
-        contentType: 'application/pdf',
-        upsert: false,
-      });
-
-    if (uploadError) throw uploadError;
-
-    // Get public URL
-    const { data: { publicUrl } } = supabase.storage
-      .from('documents')
-      .getPublicUrl(fileName);
-
-    return {
-      success: true,
-      fileUrl: publicUrl,
-      fileName: 'FO7A - Covering Letter.pdf',
-    };
-  } catch (error: any) {
-    console.error('Error generating covering letter:', error);
-    return {
-      success: false,
-      error: error.message,
-    };
-  }
+  return root.innerHTML;
 }
 
-/**
- * Generate F13I - Contract of Sale PDF
- */
-export async function generateContractOfSalePdf(
+async function generateTemplatePdf(
+  template: DbTemplate,
   quote: Quote,
-  companyData: any
+  mergeData: Record<string, unknown>,
 ): Promise<PdfGenerationResult> {
   try {
-    const { data: template, error: templateError } = await supabase
-      .from('document_templates')
-      .select('*')
-      .eq('code', 'F13I')
-      .single();
+    let htmlContent = template.html_content;
+    htmlContent = rewriteLegacyInstallerSignaturePads(htmlContent);
 
-    if (templateError || !template) {
-      throw new Error('F13I template not found');
+    let mergedHtml = mergeTemplate(htmlContent, mergeData);
+    // Fill linked pills that were left as data-tms-merge in saved HTML
+    mergedHtml = applyLiveMergeAttributes(mergedHtml, mergeData);
+    // Run {{tags}} again in case live merge left any
+    mergedHtml = mergeTemplate(mergedHtml, mergeData);
+
+    const details = getDocumentDetails(quote.customer);
+    const signatureDataUrl =
+      details.installerSignature ||
+      String(mergeData.installer_signature || '');
+    if (signatureDataUrl) {
+      mergedHtml = injectInstallerSignatureImage(
+        mergedHtml,
+        signatureDataUrl,
+        String(mergeData.technical_op || mergeData.installer_name || ''),
+      );
+    }
+    mergedHtml = injectLineItemsIntoEmptyTables(
+      mergedHtml,
+      (mergeData.line_items as LineItemMergeRow[]) || [],
+    );
+    if (template.css_styles) {
+      mergedHtml = `<style>${template.css_styles}</style>${mergedHtml}`;
     }
 
-    const depositPercentage = Math.round((quote.deposit / quote.total) * 100);
-    const mergeData = {
-      contract_date: new Date().toLocaleDateString('en-GB', { 
-        day: '2-digit', 
-        month: 'long', 
-        year: 'numeric' 
-      }),
-      customer_name: quote.customer.name,
-      customer_address: quote.customer.address,
-      customer_email: quote.customer.email,
-      customer_phone: quote.customer.phone,
-      quote_reference: quote.id.slice(0, 8).toUpperCase(),
-      company_name: companyData.name || 'Your Company',
-      company_address: companyData.address || 'Company Address Not Set',
-      company_registration: companyData.registrationNumber || companyData.registration_number || 'N/A',
-      system_description: generateSystemSummary(quote),
-      total_price: `£${quote.total.toFixed(2)}`,
-      deposit_amount: `£${quote.deposit.toFixed(2)}`,
-      deposit_percentage: `${depositPercentage}%`,
-      final_balance: `£${(quote.total - quote.deposit).toFixed(2)}`,
-      payment_method: 'Bank Transfer / Card Payment',
-      warranty_period: '10 years',
-      completion_timeframe: '4-6 weeks from deposit payment',
-    };
+    const pdfBlob = await generatePDFFromHTML(
+      mergedHtml,
+      `${template.code}-${quote.id}.pdf`,
+    );
 
-    // Generate PDF - merge template with data first
-    let mergedHtml = template.html_content;
-    Object.keys(mergeData).forEach(key => {
-      const regex = new RegExp(`{{${key}}}`, 'g');
-      mergedHtml = mergedHtml.replace(regex, String(mergeData[key] || ''));
-    });
-    
-    const pdfBlob = await generatePDFFromHTML(mergedHtml, `F13I-Contract-${quote.id}.pdf`);
-
-    const fileName = `proposals/${quote.id}/F13I-Contract-of-Sale-${Date.now()}.pdf`;
+    const storagePath = `proposals/${quote.id}/${template.code}-${Date.now()}.pdf`;
     const { error: uploadError } = await supabase.storage
       .from('documents')
-      .upload(fileName, pdfBlob, {
+      .upload(storagePath, pdfBlob, {
         contentType: 'application/pdf',
         upsert: false,
       });
 
     if (uploadError) throw uploadError;
 
-    const { data: { publicUrl } } = supabase.storage
-      .from('documents')
-      .getPublicUrl(fileName);
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from('documents').getPublicUrl(storagePath);
 
     return {
       success: true,
       fileUrl: publicUrl,
-      fileName: 'F13I - Contract of Sale.pdf',
+      fileName: `${template.code} - ${template.name}.pdf`,
     };
-  } catch (error: any) {
-    console.error('Error generating contract:', error);
-    return {
-      success: false,
-      error: error.message,
-    };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'PDF generation failed';
+    console.error(`Error generating ${template.code}:`, error);
+    return { success: false, error: message };
   }
 }
 
 /**
- * Generate F71 - Performance Estimate PDF
- */
-export async function generatePerformanceEstimatePdf(
-  quote: Quote,
-  companyData: any
-): Promise<PdfGenerationResult> {
-  try {
-    const { data: template, error: templateError } = await supabase
-      .from('document_templates')
-      .select('*')
-      .eq('code', 'F71')
-      .single();
-
-    if (templateError || !template) {
-      throw new Error('F71 template not found');
-    }
-
-    // Calculate performance estimates (simplified)
-    const batteryCapacity = getBatteryCapacity(quote);
-    const estimatedSavings = calculateEstimatedSavings(batteryCapacity);
-
-    const mergeData = {
-      report_date: new Date().toLocaleDateString('en-GB'),
-      customer_name: quote.customer.name,
-      installation_address: quote.customer.address,
-      quote_reference: quote.id.slice(0, 8).toUpperCase(),
-      battery_capacity: `${batteryCapacity} kWh`,
-      estimated_cycles_per_year: '250',
-      estimated_annual_savings: `£${estimatedSavings.annual.toFixed(2)}`,
-      estimated_monthly_savings: `£${estimatedSavings.monthly.toFixed(2)}`,
-      payback_period: `${estimatedSavings.paybackYears} years`,
-      system_lifetime: '25 years',
-      total_lifetime_savings: `£${estimatedSavings.lifetime.toFixed(2)}`,
-      co2_reduction: `${(batteryCapacity * 0.5 * 250).toFixed(0)} kg/year`,
-      system_efficiency: '95%',
-    };
-
-    // Generate PDF - merge template with data first
-    let mergedHtml = template.html_content;
-    Object.keys(mergeData).forEach(key => {
-      const regex = new RegExp(`{{${key}}}`, 'g');
-      mergedHtml = mergedHtml.replace(regex, String(mergeData[key] || ''));
-    });
-    
-    const pdfBlob = await generatePDFFromHTML(mergedHtml, `F71-Performance-${quote.id}.pdf`);
-
-    const fileName = `proposals/${quote.id}/F71-Performance-Estimate-${Date.now()}.pdf`;
-    const { error: uploadError } = await supabase.storage
-      .from('documents')
-      .upload(fileName, pdfBlob, {
-        contentType: 'application/pdf',
-        upsert: false,
-      });
-
-    if (uploadError) throw uploadError;
-
-    const { data: { publicUrl } } = supabase.storage
-      .from('documents')
-      .getPublicUrl(fileName);
-
-    return {
-      success: true,
-      fileUrl: publicUrl,
-      fileName: 'F71 - Performance Estimate.pdf',
-    };
-  } catch (error: any) {
-    console.error('Error generating performance estimate:', error);
-    return {
-      success: false,
-      error: error.message,
-    };
-  }
-}
-
-/**
- * Generate Full Quote PDF
- */
-export async function generateQuotePdf(
-  quote: Quote,
-  companyData: any
-): Promise<PdfGenerationResult> {
-  try {
-    // Build HTML for quote
-    const quoteHtml = buildQuoteHtml(quote, companyData);
-
-    const pdfBlob = await generatePDFFromHTML(quoteHtml, `Quote-${quote.id}.pdf`);
-
-    const fileName = `proposals/${quote.id}/Quote-${Date.now()}.pdf`;
-    const { error: uploadError } = await supabase.storage
-      .from('documents')
-      .upload(fileName, pdfBlob, {
-        contentType: 'application/pdf',
-        upsert: false,
-      });
-
-    if (uploadError) throw uploadError;
-
-    const { data: { publicUrl } } = supabase.storage
-      .from('documents')
-      .getPublicUrl(fileName);
-
-    return {
-      success: true,
-      fileUrl: publicUrl,
-      fileName: 'Battery Storage Quotation.pdf',
-    };
-  } catch (error: any) {
-    console.error('Error generating quote PDF:', error);
-    return {
-      success: false,
-      error: error.message,
-    };
-  }
-}
-
-/**
- * Generate all proposal pack PDFs
+ * Generate all proposal-pack PDFs from active admin templates
+ * (category = proposal, auto_generate = true, is_active = true).
  */
 export async function generateAllProposalPdfs(
   quote: Quote,
-  companyId: string
+  companyId: string,
 ): Promise<{
   success: boolean;
   generatedPdfs: Array<{ fileUrl: string; fileName: string; code: string }>;
@@ -303,90 +562,89 @@ export async function generateAllProposalPdfs(
   const generatedPdfs: Array<{ fileUrl: string; fileName: string; code: string }> = [];
   const errors: string[] = [];
 
-  // Fetch company data
-  const { data: companyData } = await supabase
+  const { data: companyData, error: companyError } = await supabase
     .from('companies')
     .select('*')
     .eq('id', companyId)
     .single();
 
-  if (!companyData) {
-    console.error('❌ Company data not found for:', companyId);
+  if (companyError || !companyData) {
     return {
       success: false,
       generatedPdfs: [],
       errors: ['Company data not found'],
     };
   }
-  
-  console.log('✅ Company data loaded:', companyData.name);
 
-  // Generate FO7A
-  console.log('📄 Generating FO7A - Covering Letter...');
-  const fo7aResult = await generateCoveringLetterPdf(quote, companyData);
-  if (fo7aResult.success && fo7aResult.fileUrl) {
-    console.log('✅ FO7A generated successfully');
-    generatedPdfs.push({
-      fileUrl: fo7aResult.fileUrl,
-      fileName: fo7aResult.fileName!,
-      code: 'FO7A',
-    });
-  } else {
-    console.error('❌ FO7A failed:', fo7aResult.error);
-    errors.push(`FO7A: ${fo7aResult.error}`);
+  const { data: templates, error: templatesError } = await supabase
+    .from('document_templates')
+    .select('id, code, name, html_content, css_styles, technologies, builder_state')
+    .eq('category', 'proposal')
+    .eq('is_active', true)
+    .eq('auto_generate', true)
+    .order('code');
+
+  if (templatesError) {
+    return {
+      success: false,
+      generatedPdfs: [],
+      errors: [templatesError.message],
+    };
   }
 
-  // Generate F13I
-  console.log('📄 Generating F13I - Contract of Sale...');
-  const f13iResult = await generateContractOfSalePdf(quote, companyData);
-  if (f13iResult.success && f13iResult.fileUrl) {
-    console.log('✅ F13I generated successfully');
-    generatedPdfs.push({
-      fileUrl: f13iResult.fileUrl,
-      fileName: f13iResult.fileName!,
-      code: 'F13I',
-    });
-  } else {
-    console.error('❌ F13I failed:', f13iResult.error);
-    errors.push(`F13I: ${f13iResult.error}`);
+  if (!templates?.length) {
+    return {
+      success: false,
+      generatedPdfs: [],
+      errors: [
+        'No active proposal templates found. Create an active Proposal Pack template in Admin → Templates.',
+      ],
+    };
   }
 
-  // Generate F71
-  console.log('📄 Generating F71 - Performance Estimate...');
-  const f71Result = await generatePerformanceEstimatePdf(quote, companyData);
-  if (f71Result.success && f71Result.fileUrl) {
-    console.log('✅ F71 generated successfully');
-    generatedPdfs.push({
-      fileUrl: f71Result.fileUrl,
-      fileName: f71Result.fileName!,
-      code: 'F71',
-    });
-  } else {
-    console.error('❌ F71 failed:', f71Result.error);
-    errors.push(`F71: ${f71Result.error}`);
+  const quoteTechs = quoteTechnologiesFromQuote(quote);
+  const matchingTemplates = templates.filter((template) =>
+    templateMatchesQuoteTechnologies(
+      resolveTemplateTechnologies({
+        technologies: template.technologies as string[] | null,
+        builder_state: template.builder_state as Record<string, unknown> | null,
+      }),
+      quoteTechs,
+    ),
+  );
+
+  if (!matchingTemplates.length) {
+    return {
+      success: false,
+      generatedPdfs: [],
+      errors: [
+        `No proposal templates match this quote’s technology (${quoteTechs.join(', ')}).`,
+      ],
+    };
   }
 
-  // Generate Quote PDF
-  console.log('📄 Generating Quote PDF...');
-  const quotePdfResult = await generateQuotePdf(quote, companyData);
-  if (quotePdfResult.success && quotePdfResult.fileUrl) {
-    console.log('✅ Quote PDF generated successfully');
-    generatedPdfs.push({
-      fileUrl: quotePdfResult.fileUrl,
-      fileName: quotePdfResult.fileName!,
-      code: 'QUOTE',
-    });
-  } else {
-    console.error('❌ Quote PDF failed:', quotePdfResult.error);
-    errors.push(`Quote PDF: ${quotePdfResult.error}`);
+  const mergeData = buildQuoteMergeData(quote, companyData);
+
+  for (const template of matchingTemplates as DbTemplate[]) {
+    if (!template.html_content?.trim()) {
+      errors.push(`${template.code}: template has no HTML content`);
+      continue;
+    }
+
+    console.log(`📄 Generating ${template.code} - ${template.name}...`);
+    const result = await generateTemplatePdf(template, quote, mergeData);
+
+    if (result.success && result.fileUrl) {
+      generatedPdfs.push({
+        fileUrl: result.fileUrl,
+        fileName: result.fileName!,
+        code: template.code,
+      });
+    } else {
+      errors.push(`${template.code}: ${result.error}`);
+    }
   }
 
-  console.log(`🎉 PDF Generation complete! Generated: ${generatedPdfs.length}, Errors: ${errors.length}`);
-  console.log('Generated PDFs:', generatedPdfs.map(p => p.code).join(', '));
-  if (errors.length > 0) {
-    console.error('Errors:', errors);
-  }
-  
   return {
     success: generatedPdfs.length > 0,
     generatedPdfs,
@@ -394,134 +652,175 @@ export async function generateAllProposalPdfs(
   };
 }
 
-// Helper functions
+/**
+ * Generate the final PDF for one living document after all roles finished.
+ * Merges quote data + living responses into the HTML snapshot.
+ */
+export async function finalizeLivingDocumentPdf(
+  livingDoc: {
+    id: string;
+    quoteId: string;
+    templateCode: string;
+    name: string;
+    htmlSnapshot: string;
+    responses: Record<string, string | boolean | null>;
+  },
+  quote: Quote,
+  companyId: string,
+): Promise<{
+  success: boolean;
+  fileUrl?: string;
+  fileName?: string;
+  documentId?: string;
+  error?: string;
+}> {
+  try {
+    const { data: companyData, error: companyError } = await supabase
+      .from('companies')
+      .select('*')
+      .eq('id', companyId)
+      .single();
+
+    if (companyError || !companyData) {
+      return { success: false, error: 'Company data not found' };
+    }
+
+    const mergeData: Record<string, unknown> = {
+      ...buildQuoteMergeData(quote, companyData),
+      ...livingDoc.responses,
+    };
+
+    const template: DbTemplate = {
+      id: livingDoc.id,
+      code: livingDoc.templateCode,
+      name: livingDoc.name,
+      html_content: livingDoc.htmlSnapshot,
+      css_styles: null,
+    };
+
+    const result = await generateTemplatePdf(template, quote, mergeData);
+    if (!result.success || !result.fileUrl) {
+      return { success: false, error: result.error || 'PDF failed' };
+    }
+
+    const { data: docData, error: docError } = await supabase
+      .from('documents')
+      .insert({
+        name: result.fileName,
+        description: `Final ${livingDoc.templateCode} for quote ${quote.id.slice(0, 8)}`,
+        category: 'proposal_pdf',
+        file_url: result.fileUrl,
+        file_name: result.fileName,
+        version: 1,
+      })
+      .select('id')
+      .single();
+
+    if (docError || !docData) {
+      return {
+        success: true,
+        fileUrl: result.fileUrl,
+        fileName: result.fileName,
+        error: docError?.message,
+      };
+    }
+
+    await supabase.from('quote_documents').insert({
+      quote_id: quote.id,
+      document_id: docData.id,
+    });
+
+    await supabase
+      .from('quote_living_documents')
+      .update({
+        status: 'completed',
+        pending_role: 'done',
+        pdf_document_id: docData.id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', livingDoc.id);
+
+    return {
+      success: true,
+      fileUrl: result.fileUrl,
+      fileName: result.fileName,
+      documentId: docData.id,
+    };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Finalize failed';
+    return { success: false, error: message };
+  }
+}
 
 function generateSystemSummary(quote: Quote): string {
   const items = quote.lineItems || [];
-  const batteries = items.filter(item => item.type === 'battery');
-  const inverters = items.filter(item => item.type === 'inverter');
-  
-  let summary = '';
-  
+  const batteries = items.filter((item) => item.type === 'battery');
+  const inverters = items.filter((item) => item.type === 'inverter');
+
+  const parts: string[] = [];
+
   if (batteries.length > 0) {
-    summary += `Battery: ${batteries.map(b => b.description).join(', ')}\n`;
+    parts.push(`Battery: ${batteries.map((b) => b.description).join(', ')}`);
   }
-  
+
   if (inverters.length > 0) {
-    summary += `Inverter: ${inverters.map(i => i.description).join(', ')}\n`;
+    parts.push(`Inverter: ${inverters.map((i) => i.description).join(', ')}`);
   }
-  
-  summary += `Installation Type: ${quote.installationType || 'Battery Storage System'}`;
-  
-  return summary;
+
+  parts.push(quote.installationType || 'Battery Storage System');
+
+  return parts.join(' · ');
 }
 
 function getBatteryCapacity(quote: Quote): number {
-  const batteries = (quote.lineItems || []).filter(item => item.type === 'battery');
-  // Extract capacity from description (e.g., "Tesla Powerwall 2 - 13.5kWh" -> 13.5)
+  const batteries = (quote.lineItems || []).filter((item) => item.type === 'battery');
   let totalCapacity = 0;
-  
-  batteries.forEach(battery => {
+
+  batteries.forEach((battery) => {
     const match = battery.description.match(/(\d+\.?\d*)\s*kWh/i);
     if (match) {
-      totalCapacity += parseFloat(match[1]) * battery.quantity;
+      totalCapacity += parseFloat(match[1]) * (battery.quantity || 1);
+      return;
+    }
+    // Some catalogs put capacity in brackets or after a dash: "SolaX BAT1 (5.8)"
+    const soft = battery.description.match(/\((\d+\.?\d*)\)/);
+    if (soft) {
+      totalCapacity += parseFloat(soft[1]) * (battery.quantity || 1);
     }
   });
-  
-  return totalCapacity || 10; // Default to 10kWh if not found
+
+  return totalCapacity;
+}
+
+function formatBatteryCapacity(
+  capacity: number,
+  quote: Quote,
+): { raw: string; labelled: string } {
+  if (capacity) {
+    return { raw: `${capacity}`, labelled: `${capacity} kWh` };
+  }
+  const batteries = (quote.lineItems || []).filter((item) => item.type === 'battery');
+  if (batteries.length) {
+    const label = batteries
+      .map((b) => (b.quantity > 1 ? `${b.quantity}× ${b.description}` : b.description))
+      .join(', ');
+    return { raw: label, labelled: label };
+  }
+  return { raw: '—', labelled: '—' };
 }
 
 function calculateEstimatedSavings(capacityKwh: number) {
-  // Simplified calculations
   const cyclesPerYear = 250;
-  const savingsPerCycle = capacityKwh * 0.25; // £0.25 per kWh saved
+  const savingsPerCycle = capacityKwh * 0.25;
   const annualSavings = savingsPerCycle * cyclesPerYear;
-  const systemCost = capacityKwh * 800; // Rough estimate
+  const systemCost = capacityKwh * 800;
   const paybackYears = Math.ceil(systemCost / annualSavings);
-  const lifetimeSavings = annualSavings * 25; // 25 year lifespan
-  
+  const lifetimeSavings = annualSavings * 25;
+
   return {
     annual: annualSavings,
     monthly: annualSavings / 12,
-    paybackYears: paybackYears,
+    paybackYears,
     lifetime: lifetimeSavings,
   };
-}
-
-function buildQuoteHtml(quote: Quote, companyData: any): string {
-  const depositPercentage = Math.round((quote.deposit / quote.total) * 100);
-  const lineItemsHtml = (quote.lineItems || []).map(item => {
-    const itemTotal = item.quantity * item.unitPrice;
-    return `
-    <tr>
-      <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; color: #1e293b;">${item.description}</td>
-      <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: center; color: #1e293b;">${item.quantity}</td>
-      <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: right; color: #1e293b;">£${item.unitPrice.toFixed(2)}</td>
-      <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: bold; color: #0f172a;">£${itemTotal.toFixed(2)}</td>
-    </tr>
-  `;
-  }).join('');
-
-  return `
-    <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 40px; color: #1e293b;">
-      <div style="text-align: center; margin-bottom: 40px;">
-        ${companyData.logo_url ? `<img src="${companyData.logo_url}" alt="Logo" style="max-width: 200px; margin-bottom: 20px;">` : ''}
-        <h1 style="color: #1e40af; margin: 0; font-size: 32px;">Battery Storage Quotation</h1>
-        <p style="color: #475569; margin: 10px 0; font-size: 14px;">Quote Reference: ${quote.id.slice(0, 8).toUpperCase()}</p>
-      </div>
-
-      <div style="background: #f0f4f8; padding: 20px; border-radius: 8px; margin-bottom: 30px; border: 1px solid #e2e8f0;">
-        <h2 style="color: #1e40af; margin-top: 0; font-size: 18px;">Customer Details</h2>
-        <p style="margin: 8px 0; color: #0f172a; font-size: 14px;"><strong>Name:</strong> ${quote.customer.name}</p>
-        <p style="margin: 8px 0; color: #0f172a; font-size: 14px;"><strong>Email:</strong> ${quote.customer.email}</p>
-        <p style="margin: 8px 0; color: #0f172a; font-size: 14px;"><strong>Phone:</strong> ${quote.customer.phone}</p>
-        <p style="margin: 8px 0; color: #0f172a; font-size: 14px;"><strong>Address:</strong> ${quote.customer.address}</p>
-      </div>
-
-      <h2 style="color: #1e40af; font-size: 18px;">Quote Details</h2>
-      <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-        <thead>
-          <tr style="background: #1e40af;">
-            <th style="padding: 12px; text-align: left; color: #ffffff; font-weight: 600;">Item</th>
-            <th style="padding: 12px; text-align: center; color: #ffffff; font-weight: 600;">Qty</th>
-            <th style="padding: 12px; text-align: right; color: #ffffff; font-weight: 600;">Unit Price</th>
-            <th style="padding: 12px; text-align: right; color: #ffffff; font-weight: 600;">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${lineItemsHtml}
-        </tbody>
-      </table>
-
-      <div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #cbd5e1; color: #1e293b;">
-        <div style="display: flex; justify-content: space-between; margin: 10px 0;">
-          <span style="color: #334155; font-size: 14px;">Subtotal:</span>
-          <span style="color: #0f172a; font-weight: 600; font-size: 14px;">£${quote.subtotal.toFixed(2)}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; margin: 10px 0;">
-          <span style="color: #334155; font-size: 14px;">VAT (${quote.vatRate}%):</span>
-          <span style="color: #0f172a; font-weight: 600; font-size: 14px;">£${quote.vatAmount.toFixed(2)}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; margin: 20px 0; font-size: 20px; font-weight: bold; color: #1e40af;">
-          <span>Total:</span>
-          <span>£${quote.total.toFixed(2)}</span>
-        </div>
-        <div style="background: #fef3c7; padding: 15px; border-radius: 8px; margin-top: 20px; border: 1px solid #fbbf24;">
-          <div style="display: flex; justify-content: space-between; margin: 5px 0;">
-            <span style="color: #78350f; font-weight: 700;">Deposit (${depositPercentage}%):</span>
-            <span style="color: #78350f; font-weight: 700;">£${quote.deposit.toFixed(2)}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; margin: 5px 0;">
-            <span style="color: #92400e;">Final Balance:</span>
-            <span style="color: #92400e; font-weight: 600;">£${(quote.total - quote.deposit).toFixed(2)}</span>
-          </div>
-        </div>
-      </div>
-
-      <div style="margin-top: 40px; padding: 20px; background: #f0f4f8; border-left: 4px solid #3b82f6; border-radius: 4px;">
-        <p style="margin: 0; color: #1e293b; font-size: 14px;"><strong>Valid Until:</strong> ${quote.validUntil ? new Date(quote.validUntil).toLocaleDateString('en-GB') : 'N/A'}</p>
-        <p style="margin: 10px 0 0 0; color: #1e293b; font-size: 14px;"><strong>Company:</strong> ${companyData.name}</p>
-      </div>
-    </div>
-  `;
 }

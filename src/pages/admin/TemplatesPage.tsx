@@ -1,56 +1,52 @@
 // @ts-nocheck - Templates page with legacy toast API
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { lazy, Suspense, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   FileText,
   Plus,
   Edit,
   Trash2,
   Eye,
-  Code,
-  Download,
   Search,
-  Filter,
   CheckCircle,
   XCircle,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
+import { TypeConfirmModal } from '../../components/ui/Modal';
 import { supabase } from '../../lib/supabase';
+import { buildTemplatePreviewHtml, resolveTemplateTechnologies, templateTechnologyLabel, type TemplateBuilderSnapshot } from '../../lib/templateBuilder';
 import { useToast } from '../../contexts/ToastContext';
 import type { DocumentTemplate, TemplateCategory } from '../../types';
 
+const TemplateBuilder = lazy(
+  () => import('../../components/admin/template-builder/TemplateBuilder'),
+);
+
 export function TemplatesPage() {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<TemplateCategory | 'all'>('all');
-  const [showModal, setShowModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [previewBuilderTemplate, setPreviewBuilderTemplate] = useState<DocumentTemplate | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<DocumentTemplate | null>(null);
-
-  // Form state
-  const [formData, setFormData] = useState({
-    code: '',
-    name: '',
-    description: '',
-    category: 'proposal' as TemplateCategory,
-    htmlContent: '',
-    cssStyles: '',
-    mergeFields: '',
-    isActive: true,
-    autoGenerate: false,
-  });
+  const [templateToDelete, setTemplateToDelete] = useState<DocumentTemplate | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     fetchTemplates();
   }, []);
 
-  const fetchTemplates = async () => {
+  const fetchTemplates = async (options?: { silent?: boolean }) => {
     try {
-      setIsLoading(true);
+      if (!options?.silent) {
+        setIsLoading(true);
+      }
+
       const { data, error } = await supabase
         .from('document_templates')
         .select('*')
@@ -58,14 +54,15 @@ export function TemplatesPage() {
 
       if (error) throw error;
 
-      // Map snake_case to camelCase
       const mappedTemplates = (data || []).map(mapTemplate);
       setTemplates(mappedTemplates);
     } catch (error: any) {
       console.error('Error fetching templates:', error);
       toast.error('Failed to load templates');
     } finally {
-      setIsLoading(false);
+      if (!options?.silent) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -81,116 +78,64 @@ export function TemplatesPage() {
     isActive: data.is_active,
     autoGenerate: data.auto_generate,
     version: data.version,
+    technologies: Array.isArray(data.technologies) ? data.technologies : [],
     createdBy: data.created_by,
     createdAt: data.created_at,
     updatedAt: data.updated_at,
+    builderState: data.builder_state || undefined,
   });
 
-  const handleSaveTemplate = async () => {
-    try {
-      const mergeFieldsArray = formData.mergeFields
-        .split(',')
-        .map((f) => f.trim())
-        .filter(Boolean);
+  const handleDeleteTemplate = async () => {
+    if (!templateToDelete) return;
 
-      const templateData = {
-        code: formData.code.toUpperCase(),
-        name: formData.name,
-        description: formData.description || null,
-        category: formData.category,
-        html_content: formData.htmlContent,
-        css_styles: formData.cssStyles || null,
-        merge_fields: mergeFieldsArray,
-        is_active: formData.isActive,
-        auto_generate: formData.autoGenerate,
-      };
-
-      if (selectedTemplate) {
-        // Update existing
-        const { error } = await supabase
-          .from('document_templates')
-          .update(templateData)
-          .eq('id', selectedTemplate.id);
-
-        if (error) throw error;
-        toast.success('Template updated successfully');
-      } else {
-        // Create new
-        const { error } = await supabase
-          .from('document_templates')
-          .insert([templateData]);
-
-        if (error) throw error;
-        toast.success('Template created successfully');
-      }
-
-      setShowModal(false);
-      resetForm();
-      fetchTemplates();
-    } catch (error: any) {
-      console.error('Error saving template:', error);
-      toast.error(error.message || 'Failed to save template');
-    }
-  };
-
-  const handleEditTemplate = (template: DocumentTemplate) => {
-    setSelectedTemplate(template);
-    setFormData({
-      code: template.code,
-      name: template.name,
-      description: template.description || '',
-      category: template.category,
-      htmlContent: template.htmlContent,
-      cssStyles: template.cssStyles || '',
-      mergeFields: template.mergeFields.join(', '),
-      isActive: template.isActive,
-      autoGenerate: template.autoGenerate,
-    });
-    setShowModal(true);
-  };
-
-  const handleDeleteTemplate = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this template?')) return;
+    const deletedId = templateToDelete.id;
 
     try {
-      const { error } = await supabase
+      setIsDeleting(true);
+
+      const { data, error } = await supabase
         .from('document_templates')
         .delete()
-        .eq('id', id);
+        .eq('id', deletedId)
+        .select('id');
 
       if (error) throw error;
+
+      if (!data?.length) {
+        throw new Error('Template could not be deleted. Check admin permissions.');
+      }
+
+      setTemplates((prev) => prev.filter((template) => template.id !== deletedId));
       toast.success('Template deleted');
-      fetchTemplates();
+      await fetchTemplates({ silent: true });
     } catch (error: any) {
       console.error('Error deleting template:', error);
-      toast.error('Failed to delete template');
+      toast.error(error?.message || 'Failed to delete template');
+    } finally {
+      setIsDeleting(false);
+      setTemplateToDelete(null);
     }
   };
 
   const handlePreview = (template: DocumentTemplate) => {
+    if (template.builderState) {
+      setPreviewBuilderTemplate(template);
+      return;
+    }
+
     setSelectedTemplate(template);
     setShowPreviewModal(true);
   };
 
-  const resetForm = () => {
-    setSelectedTemplate(null);
-    setFormData({
-      code: '',
-      name: '',
-      description: '',
-      category: 'proposal',
-      htmlContent: '',
-      cssStyles: '',
-      mergeFields: '',
-      isActive: true,
-      autoGenerate: false,
-    });
-  };
-
   const filteredTemplates = templates.filter((template) => {
+    const techText = resolveTemplateTechnologies(template)
+      .map((tech) => templateTechnologyLabel(tech))
+      .join(' ')
+      .toLowerCase();
     const matchesSearch =
       template.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      template.code.toLowerCase().includes(searchTerm.toLowerCase());
+      template.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      techText.includes(searchTerm.toLowerCase());
     const matchesCategory =
       selectedCategory === 'all' || template.category === selectedCategory;
     return matchesSearch && matchesCategory;
@@ -223,13 +168,13 @@ export function TemplatesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="page-title">Document Templates</h1>
-          <p className="page-subtitle">Manage PDF templates for proposals, contracts, and invoices</p>
+          <p className="page-subtitle">
+            Build pack documents in the template builder. Active proposal templates join the live
+            role workflow; PDF is generated only after every required role finishes.
+          </p>
         </div>
         <Button
-          onClick={() => {
-            resetForm();
-            setShowModal(true);
-          }}
+          onClick={() => navigate('/admin/templates/new')}
           leftIcon={<Plus className="w-4 h-4" />}
         >
           New Template
@@ -307,17 +252,13 @@ export function TemplatesPage() {
       {/* Templates Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredTemplates.map((template) => (
-          <motion.div
-            key={template.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
+          <div key={template.id}>
             <Card className="h-full hover:border-primary-500 transition-colors">
               <div className="space-y-4">
                 {/* Header */}
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
                       <Badge className={getCategoryColor(template.category)}>
                         {template.code}
                       </Badge>
@@ -332,6 +273,16 @@ export function TemplatesPage() {
                         </Badge>
                       )}
                     </div>
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {resolveTemplateTechnologies(template).map((tech) => (
+                        <Badge
+                          key={tech}
+                          className="bg-slate-700/80 text-slate-200 text-xs"
+                        >
+                          {templateTechnologyLabel(tech)}
+                        </Badge>
+                      ))}
+                    </div>
                     <h3 className="text-lg font-semibold text-white mb-1">
                       {template.name}
                     </h3>
@@ -339,23 +290,6 @@ export function TemplatesPage() {
                       {template.description || 'No description'}
                     </p>
                   </div>
-                </div>
-
-                {/* Merge Fields */}
-                <div className="flex flex-wrap gap-1">
-                  {template.mergeFields.slice(0, 3).map((field) => (
-                    <span
-                      key={field}
-                      className="px-2 py-1 bg-slate-800 text-slate-300 text-xs rounded"
-                    >
-                      {`{{${field}}}`}
-                    </span>
-                  ))}
-                  {template.mergeFields.length > 3 && (
-                    <span className="px-2 py-1 bg-slate-800 text-slate-300 text-xs rounded">
-                      +{template.mergeFields.length - 3} more
-                    </span>
-                  )}
                 </div>
 
                 {/* Actions */}
@@ -371,7 +305,7 @@ export function TemplatesPage() {
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={() => handleEditTemplate(template)}
+                    onClick={() => navigate(`/admin/templates/${template.id}/edit`)}
                     leftIcon={<Edit className="w-4 h-4" />}
                   >
                     Edit
@@ -379,7 +313,7 @@ export function TemplatesPage() {
                   <Button
                     variant="danger"
                     size="sm"
-                    onClick={() => handleDeleteTemplate(template.id)}
+                    onClick={() => setTemplateToDelete(template)}
                     leftIcon={<Trash2 className="w-4 h-4" />}
                   >
                     Delete
@@ -387,7 +321,7 @@ export function TemplatesPage() {
                 </div>
               </div>
             </Card>
-          </motion.div>
+          </div>
         ))}
       </div>
 
@@ -403,10 +337,7 @@ export function TemplatesPage() {
             </p>
             {!searchTerm && selectedCategory === 'all' && (
               <Button
-                onClick={() => {
-                  resetForm();
-                  setShowModal(true);
-                }}
+                onClick={() => navigate('/admin/templates/new')}
                 leftIcon={<Plus className="w-4 h-4" />}
               >
                 Create Template
@@ -416,171 +347,31 @@ export function TemplatesPage() {
         </Card>
       )}
 
-      {/* Create/Edit Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-slate-900 rounded-xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+      {/* Builder preview — same view as when creating the template */}
+      {previewBuilderTemplate && (
+        <div className="fixed inset-0 z-50 bg-[#0C0C0E]">
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center">
+                <div className="spinner w-10 h-10" />
+              </div>
+            }
           >
-            <h2 className="text-2xl font-bold text-white mb-6">
-              {selectedTemplate ? 'Edit Template' : 'Create New Template'}
-            </h2>
-
-            <div className="space-y-4">
-              {/* Basic Info */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">
-                    Template Code *
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.code}
-                    onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                    placeholder="e.g., FO7A"
-                    className="input w-full"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">
-                    Category *
-                  </label>
-                  <select
-                    value={formData.category}
-                    onChange={(e) =>
-                      setFormData({ ...formData, category: e.target.value as TemplateCategory })
-                    }
-                    className="input w-full"
-                  >
-                    <option value="proposal">Proposal</option>
-                    <option value="contract">Contract</option>
-                    <option value="handover">Handover</option>
-                    <option value="invoice">Invoice</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Template Name *
-                </label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g., Covering Letter"
-                  className="input w-full"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Description
-                </label>
-                <textarea
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Brief description of this template"
-                  rows={2}
-                  className="input w-full"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  HTML Content *
-                </label>
-                <textarea
-                  value={formData.htmlContent}
-                  onChange={(e) => setFormData({ ...formData, htmlContent: e.target.value })}
-                  placeholder="<html>...</html>"
-                  rows={10}
-                  className="input w-full font-mono text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  CSS Styles (optional)
-                </label>
-                <textarea
-                  value={formData.cssStyles}
-                  onChange={(e) => setFormData({ ...formData, cssStyles: e.target.value })}
-                  placeholder="body { font-family: Arial; }"
-                  rows={4}
-                  className="input w-full font-mono text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Merge Fields (comma-separated)
-                </label>
-                <input
-                  type="text"
-                  value={formData.mergeFields}
-                  onChange={(e) => setFormData({ ...formData, mergeFields: e.target.value })}
-                  placeholder="customer_name, quote_total, battery_capacity"
-                  className="input w-full"
-                />
-                <p className="text-xs text-slate-400 mt-1">
-                  Use these fields in HTML as: {`{{customer_name}}`}
-                </p>
-              </div>
-
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.isActive}
-                    onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-primary-500"
-                  />
-                  <span className="text-sm text-slate-300">Active</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.autoGenerate}
-                    onChange={(e) =>
-                      setFormData({ ...formData, autoGenerate: e.target.checked })
-                    }
-                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-primary-500"
-                  />
-                  <span className="text-sm text-slate-300">Auto-generate when quote sent</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <Button onClick={handleSaveTemplate} className="flex-1">
-                {selectedTemplate ? 'Update Template' : 'Create Template'}
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setShowModal(false);
-                  resetForm();
-                }}
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-            </div>
-          </motion.div>
+            <TemplateBuilder
+              key={previewBuilderTemplate.id}
+              embedMode
+              previewOnly
+              initialSnapshot={previewBuilderTemplate.builderState as TemplateBuilderSnapshot}
+              onBack={() => setPreviewBuilderTemplate(null)}
+            />
+          </Suspense>
         </div>
       )}
 
-      {/* Preview Modal */}
+      {/* HTML preview — legacy templates without builder state */}
       {showPreviewModal && selectedTemplate && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-slate-900 rounded-xl p-6 max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
-          >
+          <div className="bg-slate-900 rounded-xl p-6 max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-2xl font-bold text-white">
                 Preview: {selectedTemplate.name}
@@ -589,15 +380,39 @@ export function TemplatesPage() {
                 Close
               </Button>
             </div>
-            <div className="flex-1 overflow-auto bg-white p-6 rounded-lg">
+            <div className="flex-1 overflow-auto bg-[#EEEBE4] p-6 rounded-lg">
               <div
-                dangerouslySetInnerHTML={{ __html: selectedTemplate.htmlContent }}
-                className="prose max-w-none"
+                dangerouslySetInnerHTML={{
+                  __html: buildTemplatePreviewHtml(
+                    selectedTemplate.htmlContent,
+                    selectedTemplate.cssStyles,
+                  ),
+                }}
               />
             </div>
-          </motion.div>
+          </div>
         </div>
       )}
+
+      <TypeConfirmModal
+        isOpen={Boolean(templateToDelete)}
+        onClose={() => setTemplateToDelete(null)}
+        onConfirm={handleDeleteTemplate}
+        title="Delete template"
+        message={
+          templateToDelete
+            ? `This will permanently delete "${templateToDelete.name}" (${templateToDelete.code}). This cannot be undone.`
+            : ''
+        }
+        confirmValue={templateToDelete?.name ?? ''}
+        confirmLabel={
+          templateToDelete
+            ? `Type "${templateToDelete.name}" to confirm`
+            : undefined
+        }
+        confirmText="Delete template"
+        isLoading={isDeleting}
+      />
     </div>
   );
 }

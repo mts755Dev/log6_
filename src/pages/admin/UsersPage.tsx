@@ -283,7 +283,7 @@ export function UsersPage() {
           // Upload competency cards
           if (installerDocumentsForm.competencyCards.file) {
             const version = await getNextDocumentVersion(userId, 'competency_cards');
-            const filePath = await uploadDocument(
+            const { path: filePath, file: uploaded } = await uploadDocument(
               installerDocumentsForm.competencyCards.file,
               userId,
               'competency_cards',
@@ -292,9 +292,9 @@ export function UsersPage() {
             await saveDocumentMetadata(
               userId,
               'competency_cards',
-              installerDocumentsForm.competencyCards.file.name,
+              uploaded.name,
               filePath,
-              installerDocumentsForm.competencyCards.file.size,
+              uploaded.size,
               version,
               installerDocumentsForm.competencyCards.issuedDate,
               installerDocumentsForm.competencyCards.expiryDate
@@ -314,21 +314,26 @@ export function UsersPage() {
             const file = installerDocumentsForm[key as keyof typeof installerDocumentsForm] as File | null;
             if (file) {
               const version = await getNextDocumentVersion(userId, type);
-              const filePath = await uploadDocument(file, userId, type, version);
-              await saveDocumentMetadata(userId, type, file.name, filePath, file.size, version);
+              const { path: filePath, file: uploaded } = await uploadDocument(file, userId, type, version);
+              await saveDocumentMetadata(userId, type, uploaded.name, filePath, uploaded.size, version);
             }
           }
 
           // Upload waste license if applicable
           if (installerDocumentsForm.useExternalWasteCarrier === 'yes' && installerDocumentsForm.wasteLicense) {
             const version = await getNextDocumentVersion(userId, 'waste_license');
-            const filePath = await uploadDocument(installerDocumentsForm.wasteLicense, userId, 'waste_license', version);
+            const { path: filePath, file: uploaded } = await uploadDocument(
+              installerDocumentsForm.wasteLicense,
+              userId,
+              'waste_license',
+              version
+            );
             await saveDocumentMetadata(
               userId,
               'waste_license',
-              installerDocumentsForm.wasteLicense.name,
+              uploaded.name,
               filePath,
-              installerDocumentsForm.wasteLicense.size,
+              uploaded.size,
               version
             );
           }

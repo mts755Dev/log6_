@@ -52,6 +52,8 @@ export interface Company {
   // Branding
   logo?: string;
   brandColor?: string;
+  /** Saved installer signature (base64 data URL) for proposal PDFs. */
+  installerSignature?: string;
   
   // Insurance & Compliance
   insurance_provider?: 'QANW' | 'HICE' | 'REC' | null;
@@ -88,7 +90,9 @@ export interface BatteryProduct {
   costPrice: number;
   rrp: number;
   imageUrl?: string;
-  datasheet?: string;
+  datasheetDocumentId?: string;
+  userManualDocumentId?: string;
+  consumerCodeLeafletDocumentId?: string;
   isActive: boolean;
 }
 
@@ -105,6 +109,33 @@ export interface InverterProduct {
   rrp: number;
   features: string[];
   imageUrl?: string;
+  datasheetDocumentId?: string;
+  userManualDocumentId?: string;
+  consumerCodeLeafletDocumentId?: string;
+  isActive: boolean;
+}
+
+export interface HeatPumpProduct {
+  id: string;
+  manufacturerId?: string;
+  manufacturerName?: string;
+  brand?: string;
+  model: string;
+  code?: string;
+  nominalKw?: number;
+  phases?: 1 | 3;
+  outputW35Kw?: number;
+  copW35?: number;
+  outputW55Kw?: number;
+  copW55?: number;
+  scopSeasonal?: number;
+  erpClass?: string;
+  costPrice?: number;
+  rrp?: number;
+  imageUrl?: string;
+  datasheetDocumentId?: string;
+  userManualDocumentId?: string;
+  consumerCodeLeafletDocumentId?: string;
   isActive: boolean;
 }
 
@@ -138,6 +169,49 @@ export type QuoteStatus =
 
 export type InstallationType = 'residential' | 'commercial';
 
+export type ProjectStatus = 'draft' | 'active' | 'on_hold' | 'completed' | 'cancelled';
+
+export type ProjectType = 'battery' | 'solar' | 'simpliheat' | 'simplipv';
+
+export type ProjectTechnology = 'solar' | 'battery' | 'heat_pumps';
+
+export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
+  battery: 'Battery',
+  solar: 'Solar',
+  simpliheat: 'Simpliheat',
+  simplipv: 'SimpliPV',
+};
+
+export const PROJECT_TECHNOLOGY_LABELS: Record<ProjectTechnology, string> = {
+  solar: 'Solar',
+  battery: 'Battery',
+  heat_pumps: 'Heat Pumps',
+};
+
+export interface Project {
+  id: string;
+  companyId: string;
+  installerId: string;
+  installerName: string;
+  reference: string;
+  name: string;
+  projectType: ProjectType;
+  technologies?: ProjectTechnology[];
+  customerName: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  siteAddress: string;
+  postcode: string;
+  status: ProjectStatus;
+  estimatedValue: number;
+  description?: string;
+  notes?: string;
+  linkedSimpliHeatProjectId?: number;
+  linkedSimpliHeatProjectName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CustomerInfo {
   name: string;
   email: string;
@@ -151,6 +225,27 @@ export interface CustomerInfo {
   currentTariff: string;
   hasEv: boolean;
   evMileagePerYear?: number;
+  /** Fields required to fill proposal PDFs (tables, dates, signatures). */
+  documentDetails?: QuoteDocumentDetails;
+}
+
+/** Installer-entered pack fields that populate document templates. */
+export interface QuoteDocumentDetails {
+  siteAddress?: string;
+  designerName?: string;
+  technicalOpName?: string;
+  surveyorName?: string;
+  surveyDate?: string;
+  installDate?: string;
+  commissioningDate?: string;
+  handoverDate?: string;
+  pvPanelCount?: string;
+  pvPanelModel?: string;
+  pvAnnualYield?: string;
+  /** Base64 PNG of installer handwritten signature. */
+  installerSignature?: string;
+  /** Values for admin-defined custom linked fields ({{my_field}}). */
+  customFields?: Record<string, string>;
 }
 
 export interface TariffInfo {
@@ -404,9 +499,13 @@ export interface Notification {
 }
 
 // Document Bank Types
-export type DocumentCategory = 'consumer_code_leaflet' | 'product_datasheet' | 'template';
+export const DOCUMENT_BANK_CATEGORIES = ['consumer_code_leaflet', 'product_datasheet', 'user_manual'] as const;
+export type DocumentBankCategory = (typeof DOCUMENT_BANK_CATEGORIES)[number];
+/** Auto-generated quote PDFs — not shown in Document Bank. */
+export type GeneratedQuoteDocumentCategory = 'proposal_pdf';
+export type DocumentCategory = DocumentBankCategory | GeneratedQuoteDocumentCategory | 'template';
 export type InsuranceProvider = 'QANW' | 'HICE' | 'REC';
-export type ProductType = 'battery' | 'inverter';
+export type ProductType = 'general' | 'battery' | 'inverter' | 'heat_pump' | 'cylinder' | 'radiator';
 
 export interface Document {
   id: string;
@@ -422,6 +521,7 @@ export interface Document {
   insuranceProvider?: InsuranceProvider;
   productId?: string;
   productType?: ProductType;
+  consumerCode?: ConsumerCode;
   
   // Metadata
   version: number;
@@ -458,10 +558,15 @@ export interface DocumentTemplate {
   isActive: boolean;
   autoGenerate: boolean;
   version: number;
+  /** TMS tech keys: solar, battery, ashp, general */
+  technologies?: string[];
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
-}export interface GeneratedDocument {
+  builderState?: Record<string, unknown>;
+}
+
+export interface GeneratedDocument {
   id: string;
   templateId: string;
   quoteId?: string;
@@ -472,6 +577,55 @@ export interface DocumentTemplate {
   generatedBy?: string;
   generatedAt: string;
   mergeData?: Record<string, any>;
+}
+
+/** Who may edit a template block on living documents. */
+export type DocumentAssignee =
+  | 'customer'
+  | 'installer'
+  | 'engineer'
+  | 'compliance'
+  | 'system';
+
+export type LivingDocumentRole =
+  | 'installer'
+  | 'customer'
+  | 'engineer'
+  | 'compliance'
+  | 'done';
+
+export type LivingDocumentStatus =
+  | 'open'
+  | 'awaiting_customer'
+  | 'awaiting_engineer'
+  | 'awaiting_compliance'
+  | 'ready_for_pdf'
+  | 'completed';
+
+export interface QuoteLivingDocument {
+  id: string;
+  quoteId: string;
+  templateId?: string | null;
+  templateCode: string;
+  name: string;
+  htmlSnapshot: string;
+  builderState?: Record<string, unknown> | null;
+  responses: Record<string, string | boolean | null>;
+  requiredRoles: LivingDocumentRole[];
+  completedRoles: LivingDocumentRole[];
+  pendingRole: LivingDocumentRole;
+  status: LivingDocumentStatus;
+  pdfDocumentId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LivingDocumentEditableField {
+  key: string;
+  label: string;
+  kind: 'text' | 'checkbox' | 'signature' | 'date';
+  assignee: DocumentAssignee;
+  required?: boolean;
 }
 
 // ============================================================================

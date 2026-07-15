@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import SignatureCanvas from 'react-signature-canvas';
 import { 
   User, 
   Building2, 
@@ -16,6 +17,7 @@ import {
   Camera,
   Trash2,
   Loader2,
+  PenLine,
 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -30,6 +32,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import { useToast } from '../../contexts/ToastContext';
 import { supabase } from '../../lib/supabase';
+import { compressForUpload } from '../../lib/compressUpload';
 import type { User as UserType } from '../../types';
 import { uploadDocument, saveDocumentMetadata, getNextDocumentVersion } from '../../lib/storage';
 
@@ -65,6 +68,9 @@ export function SettingsPage() {
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const installerSigRef = useRef<SignatureCanvas>(null);
+  const [installerSignaturePreview, setInstallerSignaturePreview] = useState<string | null>(null);
+  const [isSavingSignature, setIsSavingSignature] = useState(false);
 
   const company = user?.companyId ? getCompany(user.companyId) : null;
 
@@ -120,8 +126,63 @@ export function SettingsPage() {
       if (company.logo) {
         setLogoPreview(company.logo);
       }
+      setInstallerSignaturePreview(company.installerSignature || null);
     }
   }, [company]);
+
+  const handleSaveInstallerSignature = async () => {
+    if (!company?.id) {
+      toast.error('Please save company details first.');
+      return;
+    }
+
+    let signature = installerSignaturePreview || '';
+    if (installerSigRef.current && !installerSigRef.current.isEmpty()) {
+      signature = installerSigRef.current.toDataURL('image/png');
+    }
+    if (!signature) {
+      toast.error('Please draw your signature first');
+      return;
+    }
+
+    try {
+      setIsSavingSignature(true);
+      const { error } = await supabase
+        .from('companies')
+        .update({ installer_signature: signature })
+        .eq('id', company.id);
+      if (error) throw error;
+
+      setInstallerSignaturePreview(signature);
+      await refreshData?.();
+      toast.success('Installer signature saved — it will attach automatically on new quotes');
+    } catch (error: any) {
+      console.error('Error saving installer signature:', error);
+      toast.error(error.message || 'Failed to save signature');
+    } finally {
+      setIsSavingSignature(false);
+    }
+  };
+
+  const handleClearInstallerSignature = async () => {
+    installerSigRef.current?.clear();
+    setInstallerSignaturePreview(null);
+    if (!company?.id) return;
+    try {
+      setIsSavingSignature(true);
+      const { error } = await supabase
+        .from('companies')
+        .update({ installer_signature: null })
+        .eq('id', company.id);
+      if (error) throw error;
+      await refreshData?.();
+      toast.success('Installer signature removed');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to remove signature');
+    } finally {
+      setIsSavingSignature(false);
+    }
+  };
 
   // Update profile form when user data changes
   useEffect(() => {
@@ -240,21 +301,21 @@ export function SettingsPage() {
       return;
     }
 
-    // Validate file size (max 2MB)
-    if (file.size > 2 * 1024 * 1024) {
-      toast.error('Photo must be less than 2MB.');
-      return;
-    }
-
     setIsUploadingPhoto(true);
     try {
-      const fileExt = file.name.split('.').pop();
+      const { file: uploadFile } = await compressForUpload(file);
+      if (uploadFile.size > 2 * 1024 * 1024) {
+        toast.error('Photo must be less than 2MB after compression.');
+        return;
+      }
+
+      const fileExt = uploadFile.name.split('.').pop();
       const fileName = `avatars/${user.id}/avatar_${Date.now()}.${fileExt}`;
 
       // Upload to Supabase storage
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('documents')
-        .upload(fileName, file, {
+        .upload(fileName, uploadFile, {
           cacheControl: '3600',
           upsert: true,
         });
@@ -331,27 +392,32 @@ export function SettingsPage() {
       return;
     }
 
-    // Validate file size (max 2MB)
-    if (file.size > 2 * 1024 * 1024) {
-      toast.error('Logo image must be less than 2MB.');
-      return;
-    }
-
     if (!user?.companyId && !company) {
       toast.error('Please save company details first before uploading a logo.');
       return;
     }
 
+    // Validate file size (max 2MB) after compression for raster images
     setIsUploadingLogo(true);
     try {
+      let uploadFile = file;
+      if (file.type !== 'image/svg+xml') {
+        const compressed = await compressForUpload(file);
+        uploadFile = compressed.file;
+      }
+      if (uploadFile.size > 2 * 1024 * 1024) {
+        toast.error('Logo image must be less than 2MB after compression.');
+        return;
+      }
+
       const companyId = user?.companyId || company?.id;
-      const fileExt = file.name.split('.').pop();
+      const fileExt = uploadFile.name.split('.').pop();
       const fileName = `logos/${companyId}/logo_${Date.now()}.${fileExt}`;
 
       // Upload to Supabase storage
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('documents')
-        .upload(fileName, file, {
+        .upload(fileName, uploadFile, {
           cacheControl: '3600',
           upsert: true,
         });
@@ -535,15 +601,15 @@ export function SettingsPage() {
       const version = await getNextDocumentVersion(user.id, documentType);
 
       // Upload file to storage
-      const filePath = await uploadDocument(file, user.id, documentType, version);
+      const { path: filePath, file: uploaded } = await uploadDocument(file, user.id, documentType, version);
 
       // Save metadata to database
       await saveDocumentMetadata(
         user.id,
         documentType,
-        file.name,
+        uploaded.name,
         filePath,
-        file.size,
+        uploaded.size,
         version,
         issuedDate,
         expiryDate
@@ -617,7 +683,7 @@ export function SettingsPage() {
       const version = await getNextDocumentVersion(user.id, doc.document_type);
 
       // Upload new file version to storage
-      const filePath = await uploadDocument(
+      const { path: filePath, file: uploaded } = await uploadDocument(
         newDocumentFile,
         user.id,
         doc.document_type,
@@ -628,9 +694,9 @@ export function SettingsPage() {
       await saveDocumentMetadata(
         user.id,
         doc.document_type,
-        newDocumentFile.name,
+        uploaded.name,
         filePath,
-        newDocumentFile.size,
+        uploaded.size,
         version,
         documentDates.issuedDate || undefined,
         documentDates.expiryDate || undefined
@@ -904,7 +970,7 @@ export function SettingsPage() {
         <TabPanel id="company">
           <Card>
             <h3 className="section-title">Company Details</h3>
-            <div className="max-w-xl space-y-6">
+            <div className="max-w-3xl space-y-6">
               {!company && (
                 <div className="bg-primary-500/10 border border-primary-500/30 rounded-xl p-4">
                   <p className="text-sm text-primary-300">
@@ -1039,6 +1105,73 @@ export function SettingsPage() {
                     <p className="text-xs text-slate-500 mt-2">Used throughout your installer dashboard.</p>
                   </div>
                 </div>
+
+                <div className="mt-8 pt-6 border-t border-slate-700">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <p className="text-sm font-medium text-white flex items-center gap-2">
+                        <PenLine className="w-4 h-4 text-primary-400" />
+                        Installer signature
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Save once — this signature is attached automatically when you generate proposal documents.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={handleClearInstallerSignature}
+                        disabled={isSavingSignature || !installerSignaturePreview}
+                      >
+                        Clear
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleSaveInstallerSignature}
+                        isLoading={isSavingSignature}
+                      >
+                        Save signature
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="border-2 border-slate-700 rounded-lg bg-white overflow-hidden max-w-xl">
+                    {installerSignaturePreview ? (
+                      <div className="relative">
+                        <img
+                          src={installerSignaturePreview}
+                          alt="Installer signature"
+                          className="w-full h-40 object-contain bg-white"
+                        />
+                        <button
+                          type="button"
+                          className="absolute top-2 right-2 text-xs px-2 py-1 rounded bg-slate-900/80 text-white hover:bg-slate-900"
+                          onClick={() => {
+                            setInstallerSignaturePreview(null);
+                            requestAnimationFrame(() => installerSigRef.current?.clear());
+                          }}
+                        >
+                          Redraw
+                        </button>
+                      </div>
+                    ) : (
+                      <SignatureCanvas
+                        ref={installerSigRef}
+                        onEnd={() => {
+                          if (!installerSigRef.current || installerSigRef.current.isEmpty()) return;
+                          setInstallerSignaturePreview(
+                            installerSigRef.current.toDataURL('image/png'),
+                          );
+                        }}
+                        canvasProps={{
+                          className: 'w-full h-40 rounded-lg',
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
               </div>
 
               <div className="pt-6 border-t border-slate-700">
@@ -1067,18 +1200,18 @@ export function SettingsPage() {
                     {documents.map((doc) => (
                       <div
                         key={doc.id}
-                        className="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden"
+                        className="bg-slate-800/50 rounded-xl border border-slate-700"
                       >
-                        <div className="flex items-center justify-between p-4">
-                          <div className="flex items-center gap-3 flex-1">
+                        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="flex items-start gap-3 min-w-0 flex-1">
                             <div className="w-10 h-10 bg-primary-500/10 rounded-lg flex items-center justify-center flex-shrink-0">
                               <FileText className="w-5 h-5 text-primary-400" />
                             </div>
-                            <div className="flex-1 min-w-0">
+                            <div className="min-w-0 flex-1">
                               <h5 className="text-sm font-medium text-white capitalize">
                                 {doc.document_type.replace(/_/g, ' ')}
                               </h5>
-                              <div className="flex items-center gap-3 mt-1">
+                              <div className="flex items-center gap-3 mt-1 min-w-0">
                                 <p className="text-xs text-slate-400 truncate">{doc.file_name}</p>
                                 {/* Show version badge for documents with dates OR when version > 1 */}
                                 {((doc.issued_date || doc.expiry_date) || doc.version > 1) && (
@@ -1086,7 +1219,7 @@ export function SettingsPage() {
                                 )}
                               </div>
                               {(doc.issued_date || doc.expiry_date) && (
-                                <div className="flex items-center gap-4 mt-2">
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">
                                   {doc.issued_date && (
                                     <div className="flex items-center gap-1 text-xs text-slate-400">
                                       <Calendar className="w-3 h-3" />
@@ -1111,7 +1244,7 @@ export function SettingsPage() {
                               )}
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-shrink-0">
                             <Button
                               variant="secondary"
                               size="sm"

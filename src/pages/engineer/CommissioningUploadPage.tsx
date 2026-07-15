@@ -21,6 +21,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { JobStatusPipeline } from '../../components/ui/JobStatusPipeline';
 import { supabase } from '../../lib/supabase';
+import { compressForUpload } from '../../lib/compressUpload';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { format } from 'date-fns';
@@ -186,13 +187,15 @@ export function CommissioningUploadPage() {
     try {
       setIsUploading(true);
 
+      const { file: uploadFile } = await compressForUpload(uploadForm.file);
+
       // Upload file to Supabase Storage
-      const fileExt = uploadForm.file.name.split('.').pop();
+      const fileExt = uploadFile.name.split('.').pop();
       const fileName = `${jobId}/${uploadForm.documentType}_${Date.now()}.${fileExt}`;
       
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('documents')
-        .upload(fileName, uploadForm.file);
+        .upload(fileName, uploadFile);
 
       if (uploadError) throw uploadError;
 
@@ -209,24 +212,30 @@ export function CommissioningUploadPage() {
           company_id: quote.companyId,
           document_type: uploadForm.documentType,
           file_url: publicUrl,
-          file_name: uploadForm.file.name,
-          file_size: uploadForm.file.size,
-          mime_type: uploadForm.file.type,
+          file_name: uploadFile.name,
+          file_size: uploadFile.size,
+          mime_type: uploadFile.type || uploadForm.file.type,
           uploaded_by: user.id,
           notes: uploadForm.notes || null,
         });
 
       if (insertError) throw insertError;
 
-      // Update quote status to commissioning if it's scheduled, in_progress, or completed
-      if (['scheduled', 'in_progress', 'completed'].includes(quote.status)) {
-        await supabase
-          .from('quotes')
-          .update({ status: 'commissioning' })
-          .eq('id', jobId);
-        
-        // Update local quote state to avoid re-fetching entire page
-        setQuote({ ...quote, status: 'commissioning' });
+      // Enter commissioning stage + stamp commissioning_date from this moment
+      if (['scheduled', 'in_progress', 'completed', 'commissioning'].includes(quote.status)) {
+        const { uploadCommissioning, syncCommissioningDateFromJobStage } = await import(
+          '../../services/jobTracking'
+        );
+        if (['scheduled', 'in_progress', 'completed'].includes(quote.status)) {
+          await uploadCommissioning(jobId);
+          setQuote({
+            ...quote,
+            status: 'commissioning',
+            commissioningUploadedAt: new Date().toISOString(),
+          });
+        } else {
+          await syncCommissioningDateFromJobStage(jobId);
+        }
       }
 
       toast.success('Document uploaded successfully');
@@ -312,6 +321,9 @@ export function CommissioningUploadPage() {
       });
 
       if (error) throw error;
+
+      const { syncCommissioningDateFromJobStage } = await import('../../services/jobTracking');
+      await syncCommissioningDateFromJobStage(jobId);
 
       toast.success('Submitted for compliance review!');
       setShowSubmitModal(false);

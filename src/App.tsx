@@ -22,6 +22,7 @@ import { ProductsAdminPage } from './pages/admin/ProductsAdminPage';
 import { AdminQuotesPage } from './pages/admin/AdminQuotesPage';
 import { DocumentBankPage } from './pages/admin/DocumentBankPage';
 import { TemplatesPage } from './pages/admin/TemplatesPage';
+import { AdminTemplateBuilderPage } from './pages/admin/AdminTemplateBuilderPage';
 import { InvoicesPage } from './pages/admin/InvoicesPage';
 import { VerificationPage } from './pages/admin/VerificationPage';
 
@@ -38,6 +39,11 @@ import { InstallerInvoicesPage } from './pages/installer/InstallerInvoicesPage';
 import { EngineersPage } from './pages/installer/EngineersPage';
 import { OnboardingPage } from './pages/installer/OnboardingPage';
 import { InstallationSchedulerPage } from './pages/installer/InstallationSchedulerPage';
+import { ProjectsListPage } from './pages/installer/ProjectsListPage';
+import { NewProjectPage } from './pages/installer/NewProjectPage';
+import { ProjectDetailPage } from './pages/installer/ProjectDetailPage';
+import { SimpliHeatProjectDetailPage } from './pages/installer/SimpliHeatProjectDetailPage';
+import { SimpliHeatDesignerPage } from './pages/installer/SimpliHeatDesignerPage';
 
 // Compliance Pages
 import { ComplianceDashboard } from './pages/compliance/ComplianceDashboard';
@@ -47,6 +53,8 @@ import { InstallationReviewPage } from './pages/compliance/InstallationReviewPag
 import { EngineerDashboard } from './pages/engineer/EngineerDashboard';
 import { CommissioningUploadPage } from './pages/engineer/CommissioningUploadPage';
 import { EngineerAvailabilityPage } from './pages/engineer/EngineerAvailabilityPage';
+import { LivingDocumentsPage } from './pages/shared/LivingDocumentsPage';
+import { LivingDocumentsInboxPage } from './pages/shared/LivingDocumentsInboxPage';
 
 // Placeholder Page for routes under development
 import { PlaceholderPage } from './pages/PlaceholderPage';
@@ -74,6 +82,8 @@ function App() {
               <Route path="products" element={<ProductsAdminPage />} />
               <Route path="documents" element={<DocumentBankPage />} />
               <Route path="templates" element={<TemplatesPage />} />
+              <Route path="templates/new" element={<AdminTemplateBuilderPage />} />
+              <Route path="templates/:id/edit" element={<AdminTemplateBuilderPage />} />
               <Route path="verification" element={<VerificationPage />} />
               <Route path="invoices" element={<InvoicesPage />} />
               <Route path="quotes" element={<AdminQuotesPage />} />
@@ -89,6 +99,14 @@ function App() {
               <Route path="quotes/new" element={<NewQuotePage />} />
               <Route path="quotes/:id/edit" element={<NewQuotePage />} />
               <Route path="quotes/:id" element={<QuoteDetailPage />} />
+              <Route path="documents" element={<LivingDocumentsInboxPage />} />
+              <Route path="documents/:quoteId" element={<LivingDocumentsPage />} />
+              <Route path="projects" element={<ProjectsListPage />} />
+              <Route path="projects/new" element={<NewProjectPage />} />
+              <Route path="projects/simpliheat/:id" element={<SimpliHeatProjectDetailPage />} />
+              <Route path="projects/:id/edit" element={<NewProjectPage />} />
+              <Route path="projects/:id" element={<ProjectDetailPage />} />
+              <Route path="simpliheat/designer" element={<SimpliHeatDesignerPage />} />
               <Route path="scheduler" element={<InstallationSchedulerPage />} />
               <Route path="proposals" element={<PlaceholderPage />} />
               <Route path="invoices" element={<InstallerInvoicesPage />} />
@@ -109,6 +127,8 @@ function App() {
               <Route path="dashboard" element={<ComplianceDashboard />} />
               <Route path="review/:quoteId" element={<InstallationReviewPage />} />
               <Route path="pending" element={<ComplianceDashboard />} />
+              <Route path="documents" element={<LivingDocumentsInboxPage />} />
+              <Route path="documents/:quoteId" element={<LivingDocumentsPage />} />
               <Route path="approved" element={<PlaceholderPage />} />
               <Route path="rejected" element={<PlaceholderPage />} />
               <Route path="certificates" element={<PlaceholderPage />} />
@@ -119,6 +139,8 @@ function App() {
             <Route path="/engineer" element={<DashboardLayout requiredRole="engineer" />}>
               <Route index element={<EngineerDashboard />} />
               <Route path="job/:jobId" element={<CommissioningUploadPage />} />
+              <Route path="documents" element={<LivingDocumentsInboxPage />} />
+              <Route path="documents/:quoteId" element={<LivingDocumentsPage />} />
               <Route path="availability" element={<EngineerAvailabilityPage />} />
               <Route path="settings" element={<PlaceholderPage />} />
             </Route>

@@ -1,4 +1,5 @@
-import { NavLink, useNavigate, Link } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
@@ -11,10 +12,11 @@ import {
   Settings,
   LogOut,
   ChevronRight,
-  Calculator,
   FolderOpen,
   Shield,
   X,
+  PanelLeftClose,
+  PanelLeft,
   Files,
   FileCode,
   Receipt,
@@ -22,8 +24,8 @@ import {
   Wrench,
   Briefcase,
   Calendar as CalendarIcon,
+  FolderKanban,
 } from 'lucide-react';
-import { Logo } from '../ui/Logo';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import { cn } from '../../utils/cn';
@@ -39,6 +41,10 @@ interface NavItem {
 interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
+  width: number;
+  expandedWidth: number;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
 const navigationConfig: Record<UserRole, NavItem[]> = {
@@ -58,8 +64,9 @@ const navigationConfig: Record<UserRole, NavItem[]> = {
   ],
   installer: [
     { label: 'Dashboard', path: '/installer', icon: <LayoutDashboard className="sidebar-icon" /> },
-    { label: 'New Quote', path: '/installer/quotes/new', icon: <Calculator className="sidebar-icon" /> },
-    { label: 'My Quotes', path: '/installer/quotes', icon: <FileText className="sidebar-icon" /> },
+    { label: 'My Battery Quotes', path: '/installer/quotes', icon: <FileText className="sidebar-icon" /> },
+    { label: 'Documents', path: '/installer/documents', icon: <Files className="sidebar-icon" /> },
+    { label: 'My Projects', path: '/installer/projects', icon: <FolderKanban className="sidebar-icon" /> },
     { label: 'Scheduler', path: '/installer/scheduler', icon: <CalendarIcon className="sidebar-icon" /> },
     { label: 'Proposals', path: '/installer/proposals', icon: <FolderOpen className="sidebar-icon" /> },
     { label: 'Invoices', path: '/installer/invoices', icon: <Receipt className="sidebar-icon" /> },
@@ -81,20 +88,42 @@ const navigationConfig: Record<UserRole, NavItem[]> = {
   compliance_officer: [
     { label: 'Dashboard', path: '/compliance/dashboard', icon: <LayoutDashboard className="sidebar-icon" /> },
     { label: 'Pending Reviews', path: '/compliance/dashboard', icon: <ClipboardCheck className="sidebar-icon" /> },
+    { label: 'Documents', path: '/compliance/documents', icon: <FileText className="sidebar-icon" /> },
     { label: 'Settings', path: '/compliance/settings', icon: <Settings className="sidebar-icon" /> },
   ],
   engineer: [
     { label: 'Dashboard', path: '/engineer', icon: <LayoutDashboard className="sidebar-icon" /> },
     { label: 'My Jobs', path: '/engineer', icon: <Briefcase className="sidebar-icon" /> },
+    { label: 'Documents', path: '/engineer/documents', icon: <FileText className="sidebar-icon" /> },
     { label: 'Availability', path: '/engineer/availability', icon: <CalendarIcon className="sidebar-icon" /> },
     { label: 'Settings', path: '/engineer/settings', icon: <Settings className="sidebar-icon" /> },
   ],
 };
 
-export function Sidebar({ isOpen, onClose }: SidebarProps) {
+export function Sidebar({
+  isOpen,
+  onClose,
+  width,
+  expandedWidth,
+  isCollapsed,
+  onToggleCollapse,
+}: SidebarProps) {
   const { user, logout } = useAuth();
   const { getCompany } = useData();
   const navigate = useNavigate();
+  const [isLargeScreen, setIsLargeScreen] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : true,
+  );
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(min-width: 1024px)');
+    const handleChange = () => setIsLargeScreen(mediaQuery.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+
+  const sidebarWidth = isLargeScreen ? width : expandedWidth;
+  const showCollapsed = isCollapsed && isLargeScreen;
 
   if (!user) return null;
 
@@ -149,92 +178,109 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
       {/* Sidebar */}
       <motion.aside
-        initial={{ x: -280 }}
-        animate={{ x: isOpen ? 0 : -280 }}
+        initial={{ x: -sidebarWidth }}
+        animate={{ x: isOpen ? 0 : -sidebarWidth }}
         transition={{ duration: 0.3, ease: 'easeOut' }}
+        style={{ width: sidebarWidth }}
         className={cn(
-          "fixed left-0 top-0 h-screen w-64 bg-slate-925 border-r border-slate-800 flex flex-col z-50",
-          "lg:translate-x-0 lg:z-40"
+          'fixed left-0 top-0 bottom-0 bg-slate-925 border-r border-slate-800 flex flex-col z-50',
+          'lg:translate-x-0 lg:z-40',
         )}
       >
-        {/* Logo */}
-        <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-          <Link to="/" onClick={handleNavClick} className="flex items-center gap-3">
-            {user.role === 'installer' && companyLogo ? (
-              <img 
-                src={companyLogo} 
-                alt={company?.name || 'Company'} 
-                className="h-8 max-w-[140px] object-contain"
-              />
-            ) : (
-              <Logo size="md" variant="dark" />
-            )}
-          </Link>
-          {/* Mobile close button */}
-          <button
-            onClick={onClose}
-            className="lg:hidden p-2 -mr-2 text-slate-400 hover:text-white transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
         {/* User Info */}
-        <div className="px-4 py-4 border-b border-slate-800">
-          <div className="flex items-center gap-3 px-2">
+        <div className={cn('border-b border-slate-800', showCollapsed ? 'px-2 py-3' : 'px-4 py-4')}>
+          <div
+            className={cn(
+              'flex items-center gap-3',
+              showCollapsed ? 'flex-col' : 'px-2',
+            )}
+          >
             {user.avatar ? (
               <img
                 src={user.avatar}
                 alt={user.name}
-                className="w-10 h-10 rounded-xl object-cover"
+                className="w-10 h-10 rounded-xl object-cover flex-shrink-0"
               />
             ) : (
-              <div className={cn(
-                "w-10 h-10 rounded-xl flex items-center justify-center font-semibold text-sm",
-                roleColors[user.role]
-              )}>
+              <div
+                className={cn(
+                  'w-10 h-10 rounded-xl flex items-center justify-center font-semibold text-sm flex-shrink-0',
+                  roleColors[user.role],
+                )}
+              >
                 {user.name.charAt(0).toUpperCase()}
               </div>
             )}
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-white truncate">{user.name}</p>
-              <p className="text-xs text-slate-500">{roleLabels[user.role]}</p>
+            {!showCollapsed && (
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-white truncate">{user.name}</p>
+                <p className="text-xs text-slate-500">{roleLabels[user.role]}</p>
+              </div>
+            )}
+            <div className={cn('flex items-center gap-1', showCollapsed && 'flex-col')}>
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                className="hidden lg:flex p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                aria-label={showCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                title={showCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              >
+                {showCollapsed ? (
+                  <PanelLeft className="w-5 h-5" />
+                ) : (
+                  <PanelLeftClose className="w-5 h-5" />
+                )}
+              </button>
+              <button
+                onClick={onClose}
+                className="lg:hidden p-2 text-slate-400 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
           </div>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-3 py-4 overflow-y-auto">
+        <nav className={cn('app-scrollbar flex-1 min-h-0 overflow-y-auto', showCollapsed ? 'px-2 py-3' : 'px-3 py-4')}>
           <ul className="space-y-1">
             {navigation.map((item) => (
               <li key={item.path}>
                 <NavLink
                   to={item.path}
-                  end={item.path === '/admin' || item.path === '/installer' || item.path === '/assessor' || item.path === '/installer/quotes'}
+                  end={item.path === '/admin' || item.path === '/installer' || item.path === '/assessor' || item.path === '/installer/quotes' || item.path === '/installer/projects'}
                   onClick={handleNavClick}
+                  title={showCollapsed ? item.label : undefined}
                   className={({ isActive }) =>
-                    cn('sidebar-link group', isActive && 'sidebar-link-active')
+                    cn(
+                      'sidebar-link group',
+                      isActive && 'sidebar-link-active',
+                      showCollapsed && 'justify-center px-2 py-2.5',
+                    )
                   }
-                  style={({ isActive }) => 
+                  style={({ isActive }) =>
                     isActive && brandColor
-                      ? {
-                          borderLeftColor: brandColor,
-                          backgroundColor: `${brandColor}15`,
-                        }
+                      ? { backgroundColor: `${brandColor}15` }
                       : undefined
                   }
                 >
-                  {item.icon}
-                  <span className="flex-1 font-medium">{item.label}</span>
-                  {item.badge && item.badge > 0 && (
-                    <span 
-                      className="px-2 py-0.5 text-xs text-white rounded-full font-semibold"
-                      style={{ backgroundColor: brandColor || undefined }}
-                    >
-                      {item.badge}
-                    </span>
+                  <span className="sidebar-icon-slot flex-shrink-0">{item.icon}</span>
+                  {!showCollapsed && (
+                    <>
+                      <span className="flex-1 min-w-0 font-medium truncate">{item.label}</span>
+                      {item.badge && item.badge > 0 && (
+                        <span
+                          className="px-2 py-0.5 text-xs text-white rounded-full font-semibold flex-shrink-0"
+                          style={{ backgroundColor: brandColor || undefined }}
+                        >
+                          {item.badge}
+                        </span>
+                      )}
+                      {width >= 300 && (
+                        <ChevronRight className="w-4 h-4 flex-shrink-0 opacity-0 group-hover:opacity-50 transition-opacity" />
+                      )}
+                    </>
                   )}
-                  <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-50 transition-opacity" />
                 </NavLink>
               </li>
             ))}
@@ -242,7 +288,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         </nav>
 
         {/* Company Info (for installers) */}
-        {user.role === 'installer' && (
+        {user.role === 'installer' && !showCollapsed && (
           <div className="px-5 py-3 border-t border-slate-800">
             <div className="flex items-center gap-3">
               {companyLogo ? (
@@ -272,13 +318,19 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         )}
 
         {/* Logout */}
-        <div className="p-4 border-t border-slate-800">
+        <div className={cn('border-t border-slate-800', showCollapsed ? 'p-2' : 'p-4')}>
           <button
             onClick={handleLogout}
-            className="sidebar-link w-full text-red-400 hover:text-red-300 hover:bg-red-500/10"
+            title={showCollapsed ? 'Sign Out' : undefined}
+            className={cn(
+              'sidebar-link w-full text-red-400 hover:text-red-300 hover:bg-red-500/10',
+              showCollapsed && 'justify-center px-2 py-2.5',
+            )}
           >
             <LogOut className="sidebar-icon" />
-            <span className="font-medium">Sign Out</span>
+            {!showCollapsed && (
+              <span className="font-medium truncate min-w-0 flex-1 text-left">Sign Out</span>
+            )}
           </button>
         </div>
       </motion.aside>

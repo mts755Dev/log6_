@@ -1,6 +1,7 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
+import { Input } from './Input';
 import { cn } from '../../utils/cn';
 
 interface ModalProps {
@@ -161,6 +162,85 @@ export function ConfirmModal({
             'px-4 py-2.5 font-medium rounded-lg transition-all duration-200',
             buttonVariants[variant],
             isLoading && 'opacity-50 cursor-not-allowed'
+          )}
+        >
+          {isLoading ? 'Processing...' : confirmText}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+interface TypeConfirmModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void | Promise<void>;
+  title: string;
+  message: string;
+  /** User must type this value exactly to enable confirm. */
+  confirmValue: string;
+  confirmLabel?: string;
+  confirmText?: string;
+  cancelText?: string;
+  isLoading?: boolean;
+}
+
+export function TypeConfirmModal({
+  isOpen,
+  onClose,
+  onConfirm,
+  title,
+  message,
+  confirmValue,
+  confirmLabel,
+  confirmText = 'Delete',
+  cancelText = 'Cancel',
+  isLoading = false,
+}: TypeConfirmModalProps) {
+  const [typedValue, setTypedValue] = useState('');
+  const isMatch = typedValue === confirmValue;
+
+  useEffect(() => {
+    if (!isOpen) {
+      setTypedValue('');
+    }
+  }, [isOpen]);
+
+  const handleClose = () => {
+    if (isLoading) return;
+    setTypedValue('');
+    onClose();
+  };
+
+  const handleConfirm = async () => {
+    if (isLoading || !isMatch) return;
+    await onConfirm();
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={handleClose} title={title} size="sm">
+      <p className="text-slate-300 mb-5">{message}</p>
+      <Input
+        label={confirmLabel ?? `Type "${confirmValue}" to confirm`}
+        value={typedValue}
+        onChange={(e) => setTypedValue(e.target.value)}
+        placeholder={confirmValue}
+        autoComplete="off"
+        autoFocus
+        disabled={isLoading}
+      />
+      <div className="flex gap-3 justify-end mt-6">
+        <button type="button" onClick={handleClose} disabled={isLoading} className="btn-secondary">
+          {cancelText}
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleConfirm()}
+          disabled={isLoading || !isMatch}
+          className={cn(
+            'px-4 py-2.5 font-medium rounded-lg transition-all duration-200',
+            'bg-red-600 hover:bg-red-500 text-white',
+            (isLoading || !isMatch) && 'opacity-50 cursor-not-allowed',
           )}
         >
           {isLoading ? 'Processing...' : confirmText}

@@ -1,7 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import SignatureCanvas from 'react-signature-canvas';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import {
@@ -34,7 +33,10 @@ import { Logo } from '../components/ui/Logo';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { format } from 'date-fns';
-import type { Quote } from '../types';
+import { listLivingDocumentsForShare } from '../lib/livingDocuments';
+import { buildQuoteMergeData } from '../services/proposalPdfGenerator';
+import { LivingDocumentPanel } from '../components/documents/LivingDocumentPanel';
+import type { Quote, QuoteLivingDocument } from '../types';
 
 // Initialize Stripe
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '');
@@ -168,11 +170,10 @@ export function CustomerQuoteViewPage() {
   const { quoteId, token } = useParams<{ quoteId: string; token: string }>();
   const navigate = useNavigate();
   const toast = useToast();
-  const signaturePadRef = useRef<SignatureCanvas>(null);
-
   const [quote, setQuote] = useState<Quote | null>(null);
   const [company, setCompany] = useState<any>(null);
   const [documents, setDocuments] = useState<any[]>([]);
+  const [livingDocs, setLivingDocs] = useState<QuoteLivingDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAccepting, setIsAccepting] = useState(false);
   const [showAcceptModal, setShowAcceptModal] = useState(false);
@@ -180,7 +181,7 @@ export function CustomerQuoteViewPage() {
   const [error, setError] = useState('');
   
   // Payment flow states
-  const [acceptanceStep, setAcceptanceStep] = useState<'signature' | 'payment' | 'availability'>('signature');
+  const [acceptanceStep, setAcceptanceStep] = useState<'confirm' | 'payment' | 'availability'>('confirm');
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [signatureData, setSignatureData] = useState<string>('');
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
@@ -257,6 +258,9 @@ export function CustomerQuoteViewPage() {
 
       setCompany(data.company || null);
       setDocuments(data.documents || []);
+
+      const living = await listLivingDocumentsForShare(quoteId, token);
+      setLivingDocs(living);
     } catch (err: any) {
       console.error('Error fetching quote:', err);
       setError(err.message || 'Failed to load quote');
@@ -317,26 +321,38 @@ export function CustomerQuoteViewPage() {
     }
   };
 
-  const handleProceedToAvailability = () => {
-    if (!quote || !signaturePadRef.current) return;
-
-    // Validate signature
-    if (signaturePadRef.current.isEmpty()) {
-      toast.error('Please provide your signature');
-      return;
+  const getSignatureFromProposalPack = (): string => {
+    for (const doc of livingDocs) {
+      const sig = doc.responses?.customer_signature;
+      if (typeof sig === 'string' && sig.startsWith('data:image')) {
+        return sig;
+      }
     }
+    return quote?.customerSignature || '';
+  };
 
-    // Validate name
+  const handleProceedToAvailability = () => {
+    if (!quote) return;
+
     if (!customerName.trim()) {
       toast.error('Please enter your name');
       return;
     }
 
-    // Get signature as base64
-    const signature = signaturePadRef.current.toDataURL();
-    setSignatureData(signature);
+    const awaitingCustomerForms = livingDocs.some(
+      (doc) =>
+        doc.requiredRoles.includes('customer') &&
+        !doc.completedRoles.includes('customer') &&
+        doc.status !== 'completed',
+    );
+    if (awaitingCustomerForms) {
+      toast.error('Please complete and submit your sections on the proposal forms first');
+      return;
+    }
 
-    // Move to availability step
+    // Reuse the signature from the living proposal form — do not ask again here.
+    const signature = getSignatureFromProposalPack();
+    setSignatureData(signature);
     setAcceptanceStep('availability');
   };
 
@@ -393,7 +409,7 @@ export function CustomerQuoteViewPage() {
     
     // Close modal and reset
     setShowAcceptModal(false);
-    setAcceptanceStep('signature');
+    setAcceptanceStep('confirm');
     setClientSecret(null);
     setSignatureData('');
     setSelectedDates([]);
@@ -401,10 +417,6 @@ export function CustomerQuoteViewPage() {
     setAdditionalNotes('');
     
     toast.success('Payment successful! Thank you. The installer will contact you shortly.');
-  };
-
-  const clearSignature = () => {
-    signaturePadRef.current?.clear();
   };
 
   if (isLoading) {
@@ -756,8 +768,8 @@ export function CustomerQuoteViewPage() {
           </motion.div>
         )}
 
-        {/* Proposal Pack Documents */}
-        {documents.length > 0 && (
+        {/* Proposal Pack Documents — fillable templates + static bank files */}
+        {(livingDocs.length > 0 || documents.length > 0) && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -768,48 +780,80 @@ export function CustomerQuoteViewPage() {
                 <FileText className="w-6 h-6 text-primary-400" />
                 <div>
                   <h2 className="text-2xl font-bold text-white">Proposal Pack Documents</h2>
-                  <p className="text-slate-400">Additional documents included with your proposal</p>
+                  <p className="text-slate-400">
+                    Complete your sections on the forms below, then download product leaflets included with your proposal.
+                  </p>
                 </div>
               </div>
 
-              <div className="grid gap-3">
-                {documents.map((doc: any, index: number) => (
-                  <motion.div
-                    key={doc.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    className="flex items-center justify-between p-4 bg-slate-800/50 rounded-lg hover:bg-slate-800 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-primary-500/10 rounded-lg">
-                        <FileText className="w-5 h-5 text-primary-400" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-white">{doc.name}</p>
-                        {doc.description && (
-                          <p className="text-sm text-slate-400">{doc.description}</p>
-                        )}
-                        <p className="text-xs text-slate-500 mt-1">
-                          {doc.file_size ? `${(doc.file_size / 1024).toFixed(1)} KB` : ''} • {doc.file_name}
-                        </p>
-                      </div>
-                    </div>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      leftIcon={<Download className="w-4 h-4" />}
-                      onClick={() => handleDownload(doc)}
+              {livingDocs.length > 0 && quoteId && token && (
+                <div className="space-y-4 mb-6">
+                  <p className="text-sm font-medium text-slate-300">Forms to complete</p>
+                  {livingDocs.map((doc) => (
+                    <LivingDocumentPanel
+                      key={doc.id}
+                      document={doc}
+                      mergeData={
+                        company
+                          ? buildQuoteMergeData(quote!, company)
+                          : {}
+                      }
+                      role="customer"
+                      share={{ quoteId, token }}
+                      onUpdated={(updated) =>
+                        setLivingDocs((prev) =>
+                          prev.map((d) => (d.id === updated.id ? updated : d)),
+                        )
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+
+              {documents.length > 0 && (
+                <div className="grid gap-3">
+                  {livingDocs.length > 0 && (
+                    <p className="text-sm font-medium text-slate-300">Product leaflets &amp; extras</p>
+                  )}
+                  {documents.map((doc: any, index: number) => (
+                    <motion.div
+                      key={doc.id}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.1 }}
+                      className="flex items-center justify-between p-4 bg-slate-800/50 rounded-lg hover:bg-slate-800 transition-colors"
                     >
-                      Download
-                    </Button>
-                  </motion.div>
-                ))}
-              </div>
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-primary-500/10 rounded-lg">
+                          <FileText className="w-5 h-5 text-primary-400" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-white">{doc.name}</p>
+                          {doc.description && (
+                            <p className="text-sm text-slate-400">{doc.description}</p>
+                          )}
+                          <p className="text-xs text-slate-500 mt-1">
+                            {doc.file_size ? `${(doc.file_size / 1024).toFixed(1)} KB` : ''} • {doc.file_name}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        leftIcon={<Download className="w-4 h-4" />}
+                        onClick={() => handleDownload(doc)}
+                      >
+                        Download
+                      </Button>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
 
               <div className="mt-4 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
                 <p className="text-sm text-blue-400">
-                  <strong>Note:</strong> These documents are part of your complete proposal pack and provide important information about your installation, warranties, and compliance.
+                  <strong>Note:</strong> These documents are part of your complete proposal pack.
+                  Fill only the customer sections on the forms; product datasheets and manuals are for download.
                 </p>
               </div>
             </Card>
@@ -844,12 +888,12 @@ export function CustomerQuoteViewPage() {
         isOpen={showAcceptModal}
         onClose={() => {
           setShowAcceptModal(false);
-          setAcceptanceStep('signature');
+          setAcceptanceStep('confirm');
           setClientSecret(null);
           setSignatureData('');
         }}
         title={
-          acceptanceStep === 'signature' ? 'Accept Quote' : 
+          acceptanceStep === 'confirm' ? 'Accept Quote' : 
           acceptanceStep === 'availability' ? 'Select Availability' : 
           'Pay Deposit'
         }
@@ -858,13 +902,13 @@ export function CustomerQuoteViewPage() {
         <div className="space-y-6">
           {/* Step Indicator */}
           <div className="flex items-center justify-center gap-2 mb-4">
-            <div className={`flex items-center gap-2 ${acceptanceStep === 'signature' ? 'text-primary-400' : 'text-success-400'}`}>
+            <div className={`flex items-center gap-2 ${acceptanceStep === 'confirm' ? 'text-primary-400' : 'text-success-400'}`}>
               <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                acceptanceStep === 'signature' ? 'bg-primary-500/20 border-2 border-primary-500' : 'bg-success-500'
+                acceptanceStep === 'confirm' ? 'bg-primary-500/20 border-2 border-primary-500' : 'bg-success-500'
               }`}>
-                {acceptanceStep !== 'signature' ? <Check className="w-5 h-5 text-white" /> : '1'}
+                {acceptanceStep !== 'confirm' ? <Check className="w-5 h-5 text-white" /> : '1'}
               </div>
-              <span className="text-sm font-medium">Signature</span>
+              <span className="text-sm font-medium">Confirm</span>
             </div>
             <div className="w-12 h-0.5 bg-slate-700"></div>
             <div className={`flex items-center gap-2 ${
@@ -892,8 +936,7 @@ export function CustomerQuoteViewPage() {
             </div>
           </div>
 
-          {acceptanceStep === 'signature' ? (
-            // Step 1: Signature
+          {acceptanceStep === 'confirm' ? (
             <>
               <p className="text-slate-300">
                 By accepting this quote, you agree to proceed with the installation at the quoted price of{' '}
@@ -913,6 +956,12 @@ export function CustomerQuoteViewPage() {
                 </div>
               </div>
 
+              {livingDocs.some((d) => d.requiredRoles.includes('customer')) && (
+                <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-3 text-sm text-slate-400">
+                  Your signature on the proposal forms above is used for acceptance — you do not need to sign again here.
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">
                   Confirm Your Name
@@ -924,26 +973,6 @@ export function CustomerQuoteViewPage() {
                   className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-lg text-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/50 outline-none"
                   placeholder="Enter your full name"
                 />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Your Signature
-                </label>
-                <div className="border-2 border-slate-700 rounded-lg bg-white">
-                  <SignatureCanvas
-                    ref={signaturePadRef}
-                    canvasProps={{
-                      className: 'w-full h-40 rounded-lg',
-                    }}
-                  />
-                </div>
-                <button
-                  onClick={clearSignature}
-                  className="text-sm text-primary-400 hover:text-primary-300 mt-2"
-                >
-                  Clear Signature
-                </button>
               </div>
 
               <div className="flex gap-3 pt-4">
@@ -1095,7 +1124,7 @@ export function CustomerQuoteViewPage() {
               <div className="flex gap-3 pt-4">
                 <Button
                   variant="secondary"
-                  onClick={() => setAcceptanceStep('signature')}
+                  onClick={() => setAcceptanceStep('confirm')}
                   leftIcon={<ArrowLeft className="w-4 h-4" />}
                   className="flex-1"
                 >

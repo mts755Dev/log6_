@@ -105,6 +105,58 @@ export async function sendQuoteToCustomer(data: QuoteEmailData): Promise<{
   }
 }
 
+export interface EngineerJobEmailData {
+  engineerEmail: string;
+  engineerName: string;
+  quoteReference: string;
+  customerName: string;
+  customerAddress: string;
+  scheduledDate: string;
+  scheduledTime: string;
+  documentsLink: string;
+  jobLink: string;
+  companyName: string;
+}
+
+/**
+ * Notify the assigned engineer that a job is scheduled and the
+ * customer proposal pack is available in their portal.
+ */
+export async function sendEngineerJobAssignmentEmail(
+  data: EngineerJobEmailData,
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const { error } = await supabase.functions.invoke('send-engineer-job-email', {
+      body: {
+        to: data.engineerEmail,
+        recipientName: data.engineerName,
+        subject: `New installation assigned — ${data.quoteReference}`,
+        documentsLink: data.documentsLink,
+        jobLink: data.jobLink,
+        quoteReference: data.quoteReference,
+        customerName: data.customerName,
+        customerAddress: data.customerAddress,
+        scheduledDate: data.scheduledDate,
+        scheduledTime: data.scheduledTime,
+        companyName: data.companyName,
+      },
+    });
+
+    if (error) {
+      console.error('Engineer job email error:', error);
+      return {
+        success: false,
+        message: error.message || 'Failed to notify engineer',
+      };
+    }
+
+    return { success: true, message: 'Engineer notified' };
+  } catch (error) {
+    console.error('Error sending engineer job email:', error);
+    return { success: false, message: 'Failed to notify engineer' };
+  }
+}
+
 /**
  * Send quote acceptance notification to installer
  * 

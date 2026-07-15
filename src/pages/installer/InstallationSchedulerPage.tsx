@@ -22,6 +22,11 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { format, addHours, startOfMonth, endOfMonth } from 'date-fns';
+import {
+  ensureProposalPackForQuote,
+  loadQuoteForProposalPack,
+} from '../../lib/proposalPack';
+import { sendEngineerJobAssignmentEmail } from '../../services/emailNotifications';
 
 interface Quote {
   id: string;
@@ -198,7 +203,7 @@ export function InstallationSchedulerPage() {
     try {
       setIsSaving(true);
 
-      const { data, error } = await supabase.rpc('schedule_installation_appointment', {
+      const { error } = await supabase.rpc('schedule_installation_appointment', {
         p_quote_id: quoteId,
         p_engineer_id: scheduleForm.engineerId,
         p_scheduled_date: format(selectedSlot.start, 'yyyy-MM-dd'),
@@ -209,7 +214,48 @@ export function InstallationSchedulerPage() {
 
       if (error) throw error;
 
-      toast.success('Installation scheduled successfully!');
+      // Share the same customer proposal pack with the assigned engineer
+      const engineer = engineers.find((e) => e.id === scheduleForm.engineerId);
+      try {
+        const fullQuote = await loadQuoteForProposalPack(quoteId);
+        if (fullQuote) {
+          const packResult = await ensureProposalPackForQuote(fullQuote);
+          if (packResult.errors.length) {
+            console.warn('Proposal pack warnings:', packResult.errors);
+          }
+        }
+
+        if (engineer?.email) {
+          const origin = window.location.origin;
+          const emailResult = await sendEngineerJobAssignmentEmail({
+            engineerEmail: engineer.email,
+            engineerName: engineer.name,
+            quoteReference: quote?.reference || fullQuote?.reference || quoteId,
+            customerName:
+              quote?.customer?.name || fullQuote?.customer?.name || 'Customer',
+            customerAddress:
+              quote?.customer?.address || fullQuote?.customer?.address || '',
+            scheduledDate: format(selectedSlot.start, 'dd MMM yyyy'),
+            scheduledTime: format(selectedSlot.start, 'HH:mm'),
+            documentsLink: `${origin}/engineer/documents/${quoteId}`,
+            jobLink: `${origin}/engineer/job/${quoteId}`,
+            companyName: user?.companyName || 'heliOS',
+          });
+          if (!emailResult.success) {
+            console.warn('Engineer email not sent:', emailResult.message);
+            toast.warning(
+              'Job scheduled. Engineer email could not be sent — they can open the pack in Documents.',
+            );
+          }
+        }
+      } catch (packError) {
+        console.error('Failed to share proposal pack with engineer:', packError);
+        toast.warning(
+          'Job scheduled, but sharing the proposal pack with the engineer failed. Retry from Documents if needed.',
+        );
+      }
+
+      toast.success('Installation scheduled — proposal pack shared with engineer');
       setShowScheduleModal(false);
       setScheduleForm({ engineerId: '', notes: '' });
       setSelectedSlot(null);

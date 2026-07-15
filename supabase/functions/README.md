@@ -19,6 +19,25 @@ The following environment variables need to be set in your Supabase project:
    - Production: `https://your-domain.com`
    - Used by: Email templates for login links
 
+### UK Address Lookup (Required for quote/project address autocomplete)
+
+Set these as **Supabase secrets** (server-side only — do not add to frontend `.env` with `VITE_`):
+
+1. **POSTCODES_IO_URL** — default `https://api.postcodes.io`
+2. **NOMINATIM_URL** — default `https://nominatim.openstreetmap.org/search`
+3. **GETADDRESS_BASE_URL** — default `https://api.getAddress.io`
+4. **GETADDRESS_API_KEY** — optional; from https://getaddress.io (better UK street addresses)
+
+```bash
+npx supabase secrets set POSTCODES_IO_URL=https://api.postcodes.io
+npx supabase secrets set NOMINATIM_URL=https://nominatim.openstreetmap.org/search
+npx supabase secrets set GETADDRESS_BASE_URL=https://api.getAddress.io
+npx supabase secrets set GETADDRESS_API_KEY=your_key_here
+npx supabase functions deploy uk-address-lookup
+```
+
+For local development, copy `supabase/.env.example` to `supabase/.env`.
+
 ### Setting Environment Variables
 
 #### Using Supabase CLI:
@@ -58,6 +77,7 @@ npx supabase functions deploy get-job-pipeline
 npx supabase functions deploy get-payment-history
 npx supabase functions deploy get-public-quote
 npx supabase functions deploy update-public-quote
+npx supabase functions deploy uk-address-lookup
 ```
 
 ## Available Functions

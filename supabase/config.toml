@@ -35,3 +35,6 @@ verify_jwt = true
 [functions.cancel-installer-signup]
 verify_jwt = true
 
+[functions.uk-address-lookup]
+verify_jwt = true
+

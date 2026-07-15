@@ -6,6 +6,13 @@ import { Logo } from '../../components/ui/Logo';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../contexts/AuthContext';
+import { SimpliHeatConnectionBanner } from '../../components/auth/SimpliHeatConnectionBanner';
+import {
+  consumeSimpliHeatLinkSuccess,
+  getStoredSimpliHeatLinkCode,
+  hasPendingSimpliHeatLinkSuccess,
+  storeSimpliHeatLinkCode,
+} from '../../lib/simpliheatLink';
 import type { UserRole } from '../../types';
 
 const roleConfig: Record<UserRole, { 
@@ -63,6 +70,8 @@ export function LoginPage() {
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [simpliHeatPending, setSimpliHeatPending] = useState(false);
+  const [simpliHeatLinked, setSimpliHeatLinked] = useState(false);
 
   const resolvedRole = role === 'assessor' ? 'installer' : role;
   const config = resolvedRole && roleConfig[resolvedRole] ? roleConfig[resolvedRole] : roleConfig.installer;
@@ -74,17 +83,58 @@ export function LoginPage() {
     }
   }, [role, navigate]);
 
-  // Handle success message from signup
+  // Handle success message and SimpliHeat flow from signup redirect
   useEffect(() => {
-    if (location.state?.message) {
-      setSuccessMessage(location.state.message);
-      if (location.state?.email) {
-        setEmail(location.state.email);
+    const navState = location.state as {
+      message?: string;
+      email?: string;
+      simpliheatFlow?: boolean;
+      simpliheatLinked?: boolean;
+    } | null;
+
+    if (navState?.message) {
+      setSuccessMessage(navState.message);
+      if (navState.email) {
+        setEmail(navState.email);
       }
-      // Clear the state
+    }
+
+    if (navState?.simpliheatFlow) {
+      setSimpliHeatPending(true);
+      setSimpliHeatLinked(Boolean(navState.simpliheatLinked));
+    } else if (hasPendingSimpliHeatLinkSuccess()) {
+      setSimpliHeatPending(true);
+      setSimpliHeatLinked(true);
+    } else if (getStoredSimpliHeatLinkCode()) {
+      setSimpliHeatPending(true);
+      setSimpliHeatLinked(false);
+    }
+
+    if (navState?.message || navState?.simpliheatFlow) {
       window.history.replaceState({}, document.title);
     }
   }, [location]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const linkCode = params.get('simpliheat_link');
+
+    if (linkCode) {
+      storeSimpliHeatLinkCode(linkCode);
+      setSimpliHeatPending(true);
+      setSimpliHeatLinked(false);
+      setSuccessMessage(
+        'A SimpliHeat user authorized data sharing. Sign in with your installer account to complete the connection.',
+      );
+      navigate('/login/installer', { replace: true });
+      return;
+    }
+
+    if (getStoredSimpliHeatLinkCode()) {
+      setSimpliHeatPending(true);
+      setSimpliHeatLinked(false);
+    }
+  }, [location.search, navigate, role]);
 
   // Add dark class to body for dashboard-style login
   useEffect(() => {
@@ -100,7 +150,6 @@ export function LoginPage() {
     try {
       const success = await login(email, password, currentRole as UserRole);
       if (success) {
-        // Map role to correct dashboard route
         const roleRoutes: Record<UserRole, string> = {
           admin: '/admin',
           installer: '/installer',
@@ -108,7 +157,18 @@ export function LoginPage() {
           compliance_officer: '/compliance/dashboard',
           engineer: '/engineer',
         };
-        navigate(roleRoutes[currentRole as UserRole] || `/${currentRole}`);
+        const simpliheatLinked = consumeSimpliHeatLinkSuccess();
+        const linkStillPending = Boolean(getStoredSimpliHeatLinkCode());
+        navigate(roleRoutes[currentRole as UserRole] || `/${currentRole}`, {
+          state: simpliheatLinked
+            ? { message: 'SimpliHeat account connected. Heat-loss designs are now shared with your company.' }
+            : linkStillPending
+              ? {
+                  message:
+                    'Signed in, but SimpliHeat could not be linked yet. Ask the SimpliHeat user to authorize again, then sign in once more.',
+                }
+              : undefined,
+        });
       } else {
         setError('Invalid credentials. Please check your email and try again.');
       }
@@ -216,6 +276,10 @@ export function LoginPage() {
           <p className="text-slate-400 mb-8">
             Sign in to access your {currentRole} dashboard
           </p>
+
+          {simpliHeatPending && (
+            <SimpliHeatConnectionBanner variant={simpliHeatLinked ? 'linked' : 'login'} />
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <Input

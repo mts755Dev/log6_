@@ -11,6 +11,13 @@
     scroll-behavior: smooth;
   }
 
+  html.dashboard-shell,
+  body.dark.dashboard-shell,
+  body.dark.dashboard-shell #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
   body {
     @apply bg-white text-slate-900 antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
@@ -19,6 +26,10 @@
   /* Dark mode for dashboards */
   body.dark {
     @apply bg-slate-950 text-slate-100;
+  }
+
+  body.dark.dashboard-shell {
+    overflow: hidden;
   }
 
   body.dark * {
@@ -62,6 +73,29 @@
   }
 
   body.dark ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-600;
+  }
+
+  /* Dashboard + sidebar scroll areas — same styled scrollbar as the original page scroll */
+  body.dark .app-scrollbar {
+    scrollbar-width: auto;
+    scrollbar-color: rgb(51 65 85) rgb(15 23 42);
+  }
+
+  body.dark .app-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  body.dark .app-scrollbar::-webkit-scrollbar-track {
+    @apply bg-slate-900;
+  }
+
+  body.dark .app-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-slate-700 rounded-full;
+  }
+
+  body.dark .app-scrollbar::-webkit-scrollbar-thumb:hover {
     @apply bg-slate-600;
   }
 
@@ -253,19 +287,23 @@
   /* Sidebar */
   .sidebar-link {
     @apply flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white
-           rounded-lg transition-all duration-200;
+           rounded-lg transition-all duration-200 min-w-0 overflow-hidden;
   }
   .sidebar-link:hover {
     background-color: rgba(30, 41, 59, 0.5);
   }
 
   .sidebar-link-active {
-    @apply text-white border-l-2 border-primary-500;
+    @apply text-white;
     background-color: rgba(251, 213, 25, 0.1);
   }
 
   .sidebar-icon {
-    @apply w-5 h-5 transition-colors;
+    @apply w-5 h-5 min-w-[1.25rem] min-h-[1.25rem] flex-shrink-0 transition-colors;
+  }
+
+  .sidebar-icon-slot {
+    @apply flex h-5 w-5 flex-shrink-0 items-center justify-center;
   }
 
   /* Page Layout */
@@ -397,7 +435,6 @@
 
   /* --- Sidebar --- */
   :root[style*="--brand-color"] .sidebar-link-active {
-    border-color: var(--brand-color);
     background-color: rgba(var(--brand-color-rgb), 0.1);
   }
 

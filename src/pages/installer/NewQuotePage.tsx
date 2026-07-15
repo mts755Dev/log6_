@@ -1,7 +1,8 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { v4 as uuidv4 } from 'uuid';
+import SignatureCanvas from 'react-signature-canvas';
 import {
   ArrowLeft,
   ArrowRight,
@@ -28,10 +29,12 @@ import {
   Loader2,
   MessageCircle,
   Mail,
+  PenLine,
 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
+import { UkAddressFields } from '../../components/ui/UkAddressFields';
 import { Select } from '../../components/ui/Select';
 import { Modal } from '../../components/ui/Modal';
 import { ChoosePaymentModel } from '../../components/payments/ChoosePaymentModel';
@@ -39,9 +42,17 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import { useToast } from '../../contexts/ToastContext';
 import { supabase } from '../../lib/supabase';
-import { generateAllProposalPdfs } from '../../services/proposalPdfGenerator';
+import { createLivingDocumentsForQuote } from '../../lib/livingDocuments';
 import { sendQuoteToCustomer, openQuoteInEmailClient } from '../../services/emailNotifications';
-import type { Quote, QuoteLineItem, ROIProjection, CustomerInfo, TariffInfo } from '../../types';
+import {
+  emptyDocumentDetails,
+  getDocumentDetails,
+  validateCustomerStep,
+  validateQuoteForDocumentGeneration,
+} from '../../lib/quoteDocumentValidation';
+import { listStoredMergeFields } from '../../lib/templateMergeFields';
+import type { CustomLinkedField } from '../../lib/templateBuilder';
+import type { Quote, QuoteLineItem, ROIProjection, CustomerInfo, TariffInfo, QuoteDocumentDetails } from '../../types';
 import { format } from 'date-fns';
 
 const steps = [
@@ -69,7 +80,9 @@ export function NewQuotePage() {
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [lastCreatedQuoteId, setLastCreatedQuoteId] = useState<string | null>(null);
   const [quoteForShare, setQuoteForShare] = useState<Quote | null>(null);
+  const [templateCustomFields, setTemplateCustomFields] = useState<CustomLinkedField[]>([]);
   const [isEditMode, setIsEditMode] = useState(false);
+  const installerSigRef = useRef<SignatureCanvas>(null);
 
   // Form state
   const [customer, setCustomer] = useState<CustomerInfo>({
@@ -85,7 +98,55 @@ export function NewQuotePage() {
     currentTariff: '',
     hasEv: false,
     evMileagePerYear: 0,
+    documentDetails: emptyDocumentDetails(),
   });
+
+  const updateDocumentDetails = (patch: Partial<QuoteDocumentDetails>) => {
+    setCustomer((current) => ({
+      ...current,
+      documentDetails: {
+        ...emptyDocumentDetails(),
+        ...getDocumentDetails(current),
+        ...patch,
+      },
+    }));
+  };
+
+  const documentDetails = getDocumentDetails(customer);
+  const companyProfile = user?.companyId ? getCompany(user.companyId) : null;
+  const companyInstallerSignature = companyProfile?.installerSignature || '';
+
+  // Auto-load company signature onto the quote when creating
+  useEffect(() => {
+    if (id || !companyInstallerSignature) return;
+    setCustomer((current) => {
+      const details = getDocumentDetails(current);
+      if (details.installerSignature) return current;
+      return {
+        ...current,
+        documentDetails: {
+          ...details,
+          installerSignature: companyInstallerSignature,
+        },
+      };
+    });
+  }, [id, companyInstallerSignature]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadCustomFields = async () => {
+      const fields = await listStoredMergeFields();
+      if (!cancelled) {
+        setTemplateCustomFields(
+          fields.map((f) => ({ key: f.key, label: f.label })),
+        );
+      }
+    };
+    void loadCustomFields();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const [tariff, setTariff] = useState<TariffInfo>({
     importRate: 0.28,
@@ -225,13 +286,51 @@ export function NewQuotePage() {
     ));
   };
 
+  // Prefill installer roles for document signatures when creating a new quote
+  useEffect(() => {
+    if (id || !user?.name) return;
+    setCustomer((current) => {
+      const details = getDocumentDetails(current);
+      if (details.designerName || details.technicalOpName || details.surveyorName) {
+        return current;
+      }
+      return {
+        ...current,
+        documentDetails: {
+          ...details,
+          designerName: user.name,
+          technicalOpName: user.name,
+          surveyorName: user.name,
+        },
+      };
+    });
+  }, [id, user?.name]);
+
   // Load existing quote data for editing
   useEffect(() => {
     if (id) {
       const existingQuote = getQuote(id);
       if (existingQuote) {
         setIsEditMode(true);
-        setCustomer(existingQuote.customer);
+        setCustomer({
+          ...existingQuote.customer,
+          documentDetails: {
+            ...emptyDocumentDetails(),
+            ...getDocumentDetails(existingQuote.customer),
+            designerName:
+              getDocumentDetails(existingQuote.customer).designerName ||
+              existingQuote.installerName ||
+              '',
+            technicalOpName:
+              getDocumentDetails(existingQuote.customer).technicalOpName ||
+              existingQuote.installerName ||
+              '',
+            surveyorName:
+              getDocumentDetails(existingQuote.customer).surveyorName ||
+              existingQuote.installerName ||
+              '',
+          },
+        });
         setTariff(existingQuote.tariff);
         setLineItems(existingQuote.lineItems);
         setMargin(existingQuote.marginPercentage); // Use margin percentage from existing quote
@@ -249,7 +348,16 @@ export function NewQuotePage() {
   }, [id, getQuote, navigate, toast]);
 
   // Navigation
-  const nextStep = () => setCurrentStep(prev => Math.min(prev + 1, steps.length - 1));
+  const nextStep = () => {
+    if (currentStep === 0) {
+      const errors = validateCustomerStep(customer, user?.name, companyInstallerSignature);
+      if (errors.length) {
+        toast.error(`Please complete: ${errors.slice(0, 3).join(', ')}${errors.length > 3 ? '…' : ''}`);
+        return;
+      }
+    }
+    setCurrentStep((prev) => Math.min(prev + 1, steps.length - 1));
+  };
   const prevStep = () => setCurrentStep(prev => Math.max(prev - 1, 0));
 
   // Submit quote
@@ -365,6 +473,44 @@ export function NewQuotePage() {
       return;
     }
 
+    // Capture signature from the pad if it hasn't been stored yet
+    if (
+      (!getDocumentDetails(customer).installerSignature) &&
+      installerSigRef.current &&
+      !installerSigRef.current.isEmpty()
+    ) {
+      updateDocumentDetails({
+        installerSignature: installerSigRef.current.toDataURL('image/png'),
+      });
+    }
+    const customerForSave: CustomerInfo = {
+      ...customer,
+      documentDetails: {
+        ...getDocumentDetails(customer),
+        installerSignature:
+          getDocumentDetails(customer).installerSignature ||
+          (installerSigRef.current && !installerSigRef.current.isEmpty()
+            ? installerSigRef.current.toDataURL('image/png')
+            : '') ||
+          companyInstallerSignature,
+      },
+    };
+    const saveErrors = validateQuoteForDocumentGeneration({
+      customer: customerForSave,
+      lineItems,
+      installerName: user.name,
+      companyInstallerSignature,
+    });
+    if (saveErrors.length) {
+      toast.error(
+        `Fill required document details first: ${saveErrors.slice(0, 3).join(', ')}${
+          saveErrors.length > 3 ? '…' : ''
+        }`,
+      );
+      setCurrentStep(0);
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       setShowGeneratingModal(true);
@@ -407,7 +553,7 @@ export function NewQuotePage() {
         // Update existing quote
         const updateData: Partial<Quote> = {
           status,
-          customer,
+          customer: customerForSave,
           tariff,
           lineItems: finalLineItems,
           subtotal: calculations.subtotal,
@@ -428,7 +574,7 @@ export function NewQuotePage() {
         await updateQuote(id, updateData);
         const updatedQuote = getQuote(id);
         if (!updatedQuote) throw new Error('Updated quote not found');
-        quoteToUse = updatedQuote;
+        quoteToUse = { ...updatedQuote, customer: customerForSave };
       } else {
         // Create new quote
         const quoteData: Omit<Quote, 'id' | 'createdAt' | 'updatedAt'> = {
@@ -438,7 +584,7 @@ export function NewQuotePage() {
           reference: `QT-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`,
           status,
           installationType: 'residential',
-          customer,
+          customer: customerForSave,
           tariff,
           lineItems: finalLineItems,
           subtotal: calculations.subtotal,
@@ -457,6 +603,7 @@ export function NewQuotePage() {
         };
 
         quoteToUse = await createQuote(quoteData);
+        quoteToUse = { ...quoteToUse, customer: customerForSave };
       }
 
       setQuoteForShare(quoteToUse);
@@ -480,42 +627,15 @@ export function NewQuotePage() {
           console.log('✅ Share token generated');
         }
 
-        // 🎯 STEP 2: Generate all proposal PDFs
-        const pdfResult = await generateAllProposalPdfs(quoteToUse, user.companyId);
-        
-        if (!pdfResult.success) {
-          console.error('PDF generation errors:', pdfResult.errors);
-          toast.warning('Some PDFs failed to generate, but continuing...');
+        // 🎯 STEP 2: Create living documents (PDF generated only after all roles finish)
+        const livingResult = await createLivingDocumentsForQuote(quoteToUse);
+
+        if (livingResult.errors.length) {
+          console.error('Living document errors:', livingResult.errors);
+          toast.warning('Some proposal documents could not be prepared');
         }
 
-        // 🎯 STEP 3: Create document records for generated PDFs
-        for (const pdf of pdfResult.generatedPdfs) {
-          const { data: docData, error: docError } = await supabase
-            .from('documents')
-            .insert({
-              name: pdf.fileName,
-              description: `Auto-generated ${pdf.code} for quote ${quoteToUse.id.slice(0, 8)}`,
-              category: 'template',
-              file_url: pdf.fileUrl,
-              file_name: pdf.fileName,
-              version: 1,
-            })
-            .select()
-            .single();
-
-          if (!docError && docData) {
-            // Link document to quote
-            await supabase
-              .from('quote_documents')
-              .insert({
-                quote_id: quoteToUse.id,
-                document_id: docData.id,
-              });
-            console.log(`✅ Linked ${pdf.code} to quote`);
-          }
-        }
-
-        // 🎯 STEP 4: Auto-attach Document Bank documents (CC1, CC6)
+        // 🎯 STEP 3: Auto-attach Document Bank documents (leaflets / product docs)
         const { error: attachError } = await supabase.rpc('attach_documents_to_quote', {
           p_quote_id: quoteToUse.id
         });
@@ -528,11 +648,19 @@ export function NewQuotePage() {
 
         setShowGeneratingModal(false);
         setShowShareModal(true);
-        const totalDocs = pdfResult.generatedPdfs.length + (attachError ? 0 : 2);
-        toast.success(`🎉 Quote saved with ${totalDocs} documents in proposal pack!`);
+        if (livingResult.created.length === 0) {
+          toast.warning(
+            livingResult.errors[0] ||
+              'No proposal templates prepared. Check Admin → Templates for an active Proposal Pack.',
+          );
+        } else {
+          toast.success(
+            `Prepared ${livingResult.created.length} live proposal document(s). PDF is generated after Customer, Engineer and Compliance complete their parts.`,
+          );
+        }
 
       } catch (error) {
-        console.error('Error generating proposal pack:', error);
+        console.error('Error preparing proposal pack:', error);
         toast.warning('Quote saved but some documents may be missing');
         setShowGeneratingModal(false);
         navigate(`/installer/quotes/${quoteToUse.id}`);
@@ -550,7 +678,7 @@ export function NewQuotePage() {
   return (
     <div className="max-w-5xl mx-auto">
       {/* Header */}
-      <div className="flex items-center gap-3 sm:gap-4 mb-6 sm:mb-8">
+      <div className="flex items-center gap-3 sm:gap-4 mb-6">
         <button onClick={() => navigate(-1)} className="p-2 hover:bg-slate-800 rounded-lg transition-colors shrink-0">
           <ArrowLeft className="w-5 h-5 text-slate-400" />
         </button>
@@ -561,7 +689,7 @@ export function NewQuotePage() {
       </div>
 
       {/* Progress Steps */}
-      <div className="mb-6 sm:mb-8 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+      <div className="mb-6 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
         <div className="flex items-center justify-between min-w-max sm:min-w-0">
           {steps.map((step, index) => (
             <div key={step.id} className="flex items-center">
@@ -592,19 +720,20 @@ export function NewQuotePage() {
       <AnimatePresence mode="wait">
         <motion.div
           key={currentStep}
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
+          className="relative z-10"
         >
           {/* Step 1: Customer Info */}
           {currentStep === 0 && (
-            <Card>
-              <h2 className="section-title flex items-center gap-2">
+            <Card padding="sm">
+              <h2 className="section-title mb-3 flex items-center gap-2">
                 <User className="w-5 h-5 text-primary-400" />
                 Customer Information
               </h2>
-              <div className="form-grid">
+              <div className="form-grid gap-4">
                 <Input
                   label="Full Name"
                   value={customer.name}
@@ -638,22 +767,120 @@ export function NewQuotePage() {
                     { value: 'commercial', label: 'Commercial' },
                   ]}
                 />
-                <div className="md:col-span-2">
+                <UkAddressFields
+                  address={customer.address}
+                  postcode={customer.postcode}
+                  onAddressChange={(address) => setCustomer((current) => ({ ...current, address }))}
+                  onPostcodeChange={(postcode) => setCustomer((current) => ({ ...current, postcode }))}
+                  addressClassName="md:col-span-2"
+                  required
+                />
+              </div>
+
+              <div className="mt-6 pt-5 border-t border-slate-700 space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-primary-400" />
+                    Document pack details
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Survey date is required for templates. Commissioning date is set automatically when the engineer completes the commissioning stage. Names and signature come from your account / company settings.
+                  </p>
+                </div>
+
+                <div className="form-grid gap-4">
                   <Input
-                    label="Address"
-                    value={customer.address}
-                    onChange={(e) => setCustomer({ ...customer, address: e.target.value })}
-                    placeholder="123 High Street, Bristol"
+                    label="Survey date"
+                    type="date"
+                    value={documentDetails.surveyDate || ''}
+                    onChange={(e) => updateDocumentDetails({ surveyDate: e.target.value })}
                     required
                   />
                 </div>
-                <Input
-                  label="Postcode"
-                  value={customer.postcode}
-                  onChange={(e) => setCustomer({ ...customer, postcode: e.target.value })}
-                  placeholder="BS1 4AB"
-                  required
-                />
+
+                {templateCustomFields.length > 0 && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-slate-500">
+                      Extra fields used by your proposal templates
+                    </p>
+                    <div className="form-grid gap-4">
+                      {templateCustomFields.map((field) => (
+                        <Input
+                          key={field.key}
+                          label={field.label}
+                          value={(documentDetails.customFields || {})[field.key] || ''}
+                          onChange={(e) =>
+                            updateDocumentDetails({
+                              customFields: {
+                                ...(documentDetails.customFields || {}),
+                                [field.key]: e.target.value,
+                              },
+                            })
+                          }
+                          placeholder={`Enter ${field.label}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {!companyInstallerSignature && (
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm font-medium text-slate-300">
+                        <span className="inline-flex items-center gap-2">
+                          <PenLine className="w-4 h-4 text-primary-400" />
+                          Installer signature
+                        </span>
+                        <span className="text-red-400 ml-1">*</span>
+                      </label>
+                      <button
+                        type="button"
+                        className="text-xs text-slate-400 hover:text-white"
+                        onClick={() => {
+                          installerSigRef.current?.clear();
+                          updateDocumentDetails({ installerSignature: '' });
+                        }}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-2">
+                      No company signature found. Draw one here, or save it once in Settings → Company.
+                    </p>
+                    <div className="border-2 border-slate-700 rounded-lg bg-white overflow-hidden">
+                      {documentDetails.installerSignature ? (
+                        <div className="relative">
+                          <img
+                            src={documentDetails.installerSignature}
+                            alt="Installer signature"
+                            className="w-full h-40 object-contain bg-white"
+                          />
+                          <button
+                            type="button"
+                            className="absolute top-2 right-2 text-xs px-2 py-1 rounded bg-slate-900/80 text-white hover:bg-slate-900"
+                            onClick={() => updateDocumentDetails({ installerSignature: '' })}
+                          >
+                            Redraw
+                          </button>
+                        </div>
+                      ) : (
+                        <SignatureCanvas
+                          ref={installerSigRef}
+                          onEnd={() => {
+                            if (!installerSigRef.current || installerSigRef.current.isEmpty()) return;
+                            updateDocumentDetails({
+                              installerSignature: installerSigRef.current.toDataURL('image/png'),
+                            });
+                          }}
+                          canvasProps={{
+                            className: 'w-full h-40 rounded-lg',
+                          }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </Card>
           )}
@@ -701,7 +928,7 @@ export function NewQuotePage() {
                     <motion.div
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
-                      className="mt-4"
+                      className="mt-4 space-y-4"
                     >
                       <Input
                         label="Solar System Size (kWp)"
@@ -710,7 +937,28 @@ export function NewQuotePage() {
                         value={customer.solarCapacityKwp || ''}
                         onChange={(e) => setCustomer({ ...customer, solarCapacityKwp: Number(e.target.value) })}
                         placeholder="e.g., 4.5"
+                        required
                       />
+                      <div className="form-grid gap-4">
+                        <Input
+                          label="PV panel count"
+                          value={documentDetails.pvPanelCount || ''}
+                          onChange={(e) => updateDocumentDetails({ pvPanelCount: e.target.value })}
+                          placeholder="e.g. 12"
+                        />
+                        <Input
+                          label="PV panel model"
+                          value={documentDetails.pvPanelModel || ''}
+                          onChange={(e) => updateDocumentDetails({ pvPanelModel: e.target.value })}
+                          placeholder="e.g. JA Solar 430W"
+                        />
+                        <Input
+                          label="Est. annual PV yield"
+                          value={documentDetails.pvAnnualYield || ''}
+                          onChange={(e) => updateDocumentDetails({ pvAnnualYield: e.target.value })}
+                          placeholder="e.g. 3,800 kWh"
+                        />
+                      </div>
                     </motion.div>
                   )}
                 </div>
@@ -1058,6 +1306,14 @@ export function NewQuotePage() {
                       <p className="text-slate-400 text-sm">{customer.phone}</p>
                       <p className="text-slate-400 text-sm">{customer.address}</p>
                       <p className="text-slate-400 text-sm">{customer.postcode}</p>
+                      {(documentDetails.surveyDate || documentDetails.commissioningDate) && (
+                        <p className="text-slate-400 text-sm mt-2">
+                          Survey {documentDetails.surveyDate || '—'}
+                          {documentDetails.commissioningDate
+                            ? ` · Comm. ${documentDetails.commissioningDate} (from job stage)`
+                            : ' · Comm. auto at commissioning'}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -1123,7 +1379,7 @@ export function NewQuotePage() {
               <Card className="!p-4">
                 <div className="flex items-center justify-between">
                   <p className="text-sm text-slate-400">
-                    Ready to proceed? Save your quote to generate the proposal pack.
+                    Ready to proceed? Complete customer details, then save to prepare live proposal forms (PDF only at the end).
                   </p>
                   <div className="flex gap-3">
                     <Button
@@ -1142,7 +1398,7 @@ export function NewQuotePage() {
       </AnimatePresence>
 
       {/* Navigation Buttons */}
-      <div className="flex justify-between mt-8">
+      <div className="relative z-0 flex justify-between mt-6">
         <Button
           variant="secondary"
           onClick={prevStep}
@@ -1172,18 +1428,19 @@ export function NewQuotePage() {
         />
       )}
 
-      {/* Generating Documents Modal */}
+      {/* Preparing living documents modal */}
       <Modal
         isOpen={showGeneratingModal}
-        onClose={() => {}} // Prevent closing while generating
-        title="Generating Documents"
+        onClose={() => {}} // Prevent closing while preparing
+        title="Preparing proposal pack"
         size="sm"
       >
         <div className="flex flex-col items-center justify-center py-8 space-y-4">
           <Loader2 className="w-12 h-12 text-primary-500 animate-spin" />
-          <p className="text-slate-300 font-medium">Waiting for generating documents...</p>
+          <p className="text-slate-300 font-medium">Setting up live documents…</p>
           <p className="text-sm text-slate-500 text-center">
-            We're preparing your proposal pack and generating all necessary PDFs. This may take a few moments.
+            We’re attaching your proposal forms for the customer, engineer, and compliance to complete.
+            PDFs are created only after every required role finishes.
           </p>
         </div>
       </Modal>

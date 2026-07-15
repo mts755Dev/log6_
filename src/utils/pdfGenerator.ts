@@ -8,31 +8,33 @@ import type { Quote, Company, DocumentTemplate } from '../types';
  */
 export function mergeTemplate(htmlContent: string, data: Record<string, any>): string {
   let merged = htmlContent;
-  
-  // Replace all {{field}} with actual values
+
+  // Expand array blocks first so nested {{keys}} resolve from item rows,
+  // and so String(array) never pollutes simple replacements.
+  const arrayRegex = /{{#(\w+)}}([\s\S]*?){{\/\1}}/g;
+  merged = merged.replace(arrayRegex, (_match, arrayName, content) => {
+    const arrayData = data[arrayName];
+    if (!Array.isArray(arrayData)) return '';
+
+    return arrayData
+      .map((item) => {
+        let itemContent = content;
+        Object.keys(item || {}).forEach((key) => {
+          const itemRegex = new RegExp(`{{${key}}}`, 'g');
+          itemContent = itemContent.replace(itemRegex, String(item[key] ?? ''));
+        });
+        return itemContent;
+      })
+      .join('');
+  });
+
   Object.keys(data).forEach((key) => {
+    if (Array.isArray(data[key])) return;
     const regex = new RegExp(`{{${key}}}`, 'g');
     const value = data[key] !== null && data[key] !== undefined ? String(data[key]) : '';
     merged = merged.replace(regex, value);
   });
-  
-  // Handle arrays (for line items)
-  // Format: {{#line_items}} ... {{/line_items}}
-  const arrayRegex = /{{#(\w+)}}([\s\S]*?){{\/\1}}/g;
-  merged = merged.replace(arrayRegex, (match, arrayName, content) => {
-    const arrayData = data[arrayName];
-    if (!Array.isArray(arrayData)) return '';
-    
-    return arrayData.map((item) => {
-      let itemContent = content;
-      Object.keys(item).forEach((key) => {
-        const itemRegex = new RegExp(`{{${key}}}`, 'g');
-        itemContent = itemContent.replace(itemRegex, String(item[key]));
-      });
-      return itemContent;
-    }).join('');
-  });
-  
+
   return merged;
 }
 
@@ -51,7 +53,9 @@ export function generateMergeData(quote: Quote, company: Company): Record<string
   return {
     // Company Info
     company_name: company.name,
-    company_logo: company.logoUrl || '',
+    company_logo:
+      company.logo ||
+      `${typeof window !== 'undefined' ? window.location.origin : ''}/assets/Main heliOS Logo.png`,
     company_email: company.email || '',
     company_phone: company.phone || '',
     company_address: company.address || '',
@@ -150,6 +154,125 @@ function findSafeCutY(
 }
 
 /**
+ * html2canvas clips text inside <input>/<textarea>. Convert them to static
+ * elements before capture so PDF text is not vertically cut off.
+ */
+function flattenFormControlsForPdf(root: HTMLElement) {
+  root.querySelectorAll('input, textarea').forEach((el) => {
+    const input = el as HTMLInputElement | HTMLTextAreaElement;
+    const type = ('type' in input ? String(input.type || 'text') : 'text').toLowerCase();
+    if (type === 'checkbox' || type === 'radio' || type === 'hidden' || type === 'file') return;
+
+    const replacement = document.createElement('div');
+    replacement.textContent = input.value || '';
+    const existing = input.getAttribute('style') || '';
+    const isTextarea = el.tagName === 'TEXTAREA';
+    replacement.setAttribute(
+      'style',
+      [
+        existing,
+        'display:block',
+        'width:100%',
+        'height:auto',
+        'min-height:0',
+        'overflow:visible',
+        'border:none',
+        'background:transparent',
+        'padding:0',
+        'resize:none',
+        `white-space:${isTextarea ? 'pre-wrap' : 'normal'}`,
+        'line-height:1.45',
+        'box-sizing:border-box',
+      ].join(';')
+    );
+    el.replaceWith(replacement);
+  });
+
+  root.querySelectorAll('.tms-section').forEach((sec) => {
+    (sec as HTMLElement).style.overflow = 'visible';
+  });
+}
+
+const DEFAULT_PDF_LOGO = '/assets/Main heliOS Logo.png';
+
+/**
+ * html2canvas often drops remote logos (CORS / empty src). Convert every
+ * real <img> to a data URL before capture so letterheads survive PDF export.
+ */
+async function inlineImagesForPdf(root: HTMLElement): Promise<void> {
+  const images = Array.from(root.querySelectorAll('img'));
+  const fallbackLogo = new URL(DEFAULT_PDF_LOGO, window.location.origin).href;
+
+  await Promise.all(
+    images.map(async (img) => {
+      const rawSrc = (img.getAttribute('src') || '').trim();
+      let src = rawSrc;
+
+      if (
+        !src ||
+        src === '{{company_logo}}' ||
+        /^\{\{.*\}\}$/.test(src) ||
+        src === 'undefined' ||
+        src === 'null'
+      ) {
+        src = fallbackLogo;
+      }
+
+      if (src.startsWith('data:')) {
+        img.setAttribute('src', src);
+        return;
+      }
+
+      try {
+        const absolute = new URL(src, window.location.origin).href;
+        const response = await fetch(absolute, { mode: 'cors', credentials: 'omit' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        if (dataUrl) img.setAttribute('src', dataUrl);
+      } catch {
+        if (src !== fallbackLogo) {
+          try {
+            const response = await fetch(fallbackLogo, { mode: 'cors', credentials: 'omit' });
+            if (!response.ok) return;
+            const blob = await response.blob();
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(String(reader.result || ''));
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+            if (dataUrl) img.setAttribute('src', dataUrl);
+          } catch {
+            // Leave original src if fallback also fails
+          }
+        }
+      }
+    }),
+  );
+
+  // Give the browser a tick to decode swapped images
+  await Promise.all(
+    Array.from(root.querySelectorAll('img')).map(
+      (img) =>
+        new Promise<void>((resolve) => {
+          if (img.complete) {
+            resolve();
+            return;
+          }
+          img.onload = () => resolve();
+          img.onerror = () => resolve();
+        }),
+    ),
+  );
+}
+
+/**
  * Generate PDF from HTML content
  */
 export async function generatePDFFromHTML(
@@ -167,13 +290,18 @@ export async function generatePDFFromHTML(
   container.style.fontSize = '14px';
   container.style.lineHeight = '1.6';
   container.innerHTML = htmlContent;
+  flattenFormControlsForPdf(container);
   document.body.appendChild(container);
 
   try {
+    await inlineImagesForPdf(container);
+
     const canvas = await html2canvas(container, {
       scale: 2,
       useCORS: true,
+      allowTaint: false,
       logging: false,
+      imageTimeout: 15000,
     });
 
     const pdf = new jsPDF({

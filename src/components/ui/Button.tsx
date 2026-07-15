@@ -21,6 +21,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       leftIcon,
       rightIcon,
       disabled,
+      type = 'button',
       children,
       ...props
     },
@@ -58,6 +59,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           className
         )}
         disabled={disabled || isLoading}
+        type={type}
         {...props}
       >
         {isLoading ? (

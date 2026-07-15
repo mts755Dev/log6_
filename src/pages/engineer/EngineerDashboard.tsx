@@ -218,7 +218,12 @@ export function EngineerDashboard() {
                     )}
                   </div>
 
-                  <div className="ml-4">
+                  <div className="ml-4 flex flex-col gap-2">
+                    <Link to={`/engineer/documents/${job.quote_id}`}>
+                      <Button variant="secondary" size="sm" leftIcon={<FileText className="w-4 h-4" />}>
+                        Proposal Pack
+                      </Button>
+                    </Link>
                     <Link to={`/engineer/job/${job.quote_id}`}>
                       <Button
                         variant={

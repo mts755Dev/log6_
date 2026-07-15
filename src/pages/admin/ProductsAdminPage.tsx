@@ -8,6 +8,9 @@ import {
   Trash2,
   Battery,
   Cpu,
+  Flame,
+  Droplets,
+  Heater,
   XCircle,
 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
@@ -21,16 +24,65 @@ import { Select } from '../../components/ui/Select';
 import { useToast } from '../../contexts/ToastContext';
 import { supabase } from '../../lib/supabase';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
-import type { BatteryProduct, InverterProduct, Manufacturer } from '../../types';
+import type { BatteryProduct, InverterProduct, HeatPumpProduct, Manufacturer, DocumentBankCategory } from '../../types';
+import { DOCUMENT_BANK_CATEGORIES } from '../../types';
+import {
+  batteryFormToDb,
+  batteryFromDb,
+  emptyBatteryForm,
+  emptyHeatPumpForm,
+  emptyInverterForm,
+  getDocumentOptions,
+  inverterFormToDb,
+  inverterFromDb,
+  type BatteryFormState,
+  type HeatPumpFormState,
+  type InverterFormState,
+} from '../../lib/productSpecs';
+import {
+  BatteryProductFields,
+  CylinderProductFields,
+  HeatPumpProductFields,
+  InverterProductFields,
+  RadiatorProductFields,
+} from '../../components/admin/products/ProductSpecFormFields';
+import {
+  ashpFormToRow,
+  ashpFromRow,
+  ashpRowToCatalogue,
+  cylinderFormToRow,
+  cylinderFromRow,
+  emptyCylinderForm,
+  emptyRadiatorForm,
+  parseShData,
+  radiatorFormToRow,
+  radiatorFromRow,
+  type CylinderFormState,
+  type RadiatorFormState,
+  type ShProductRow,
+} from '../../lib/shProducts';
+import { tagDocumentsProductType } from '../../lib/documentProductLinks';
+
+interface BankDocument {
+  id: string;
+  name: string;
+  category: DocumentBankCategory;
+}
 
 export function ProductsAdminPage() {
   const toast = useToast();
   const [batteries, setBatteries] = useState<BatteryProduct[]>([]);
   const [inverters, setInverters] = useState<InverterProduct[]>([]);
+  const [heatPumps, setHeatPumps] = useState<HeatPumpProduct[]>([]);
+  const [cylinders, setCylinders] = useState<ShProductRow[]>([]);
+  const [radiators, setRadiators] = useState<ShProductRow[]>([]);
   const [manufacturers, setManufacturers] = useState<Manufacturer[]>([]);
+  const [bankDocuments, setBankDocuments] = useState<BankDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState('batteries');
+  const [pageTab, setPageTab] = useState<'products' | 'manufacturers'>('products');
+  const [listFilter, setListFilter] = useState<'all' | 'batteries' | 'inverters' | 'heat_pumps' | 'cylinders' | 'radiators'>('all');
+  const [modalProductType, setModalProductType] = useState<'batteries' | 'inverters' | 'heat_pumps' | 'cylinders' | 'radiators'>('batteries');
 
   // Modal states
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -39,28 +91,11 @@ export function ProductsAdminPage() {
   const [itemToEdit, setItemToEdit] = useState<any>(null);
   const [itemToDelete, setItemToDelete] = useState<any>(null);
   
-  // Form data states
-  const [batteryForm, setBatteryForm] = useState({
-    model: '',
-    manufacturerId: '',
-    capacityKwh: '',
-    powerKw: '',
-    warrantyYears: '',
-    costPrice: '',
-    rrp: '',
-    isActive: true,
-  });
-
-  const [inverterForm, setInverterForm] = useState({
-    model: '',
-    manufacturerId: '',
-    powerKw: '',
-    phases: '1',
-    efficiency: '',
-    costPrice: '',
-    rrp: '',
-    isActive: true,
-  });
+  const [batteryForm, setBatteryForm] = useState<BatteryFormState>(emptyBatteryForm());
+  const [inverterForm, setInverterForm] = useState<InverterFormState>(emptyInverterForm());
+  const [heatPumpForm, setHeatPumpForm] = useState<HeatPumpFormState>(emptyHeatPumpForm());
+  const [cylinderForm, setCylinderForm] = useState<CylinderFormState>(emptyCylinderForm());
+  const [radiatorForm, setRadiatorForm] = useState<RadiatorFormState>(emptyRadiatorForm());
 
   const [manufacturerForm, setManufacturerForm] = useState({
     name: '',
@@ -76,7 +111,51 @@ export function ProductsAdminPage() {
   }, []);
 
   const fetchAll = async () => {
-    await Promise.all([fetchManufacturers(), fetchBatteries(), fetchInverters()]);
+    await Promise.all([
+      fetchManufacturers(),
+      fetchBatteries(),
+      fetchInverters(),
+      fetchShProducts(),
+      fetchBankDocuments(),
+    ]);
+  };
+
+  const fetchBankDocuments = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('documents')
+        .select('id, name, category')
+        .in('category', [...DOCUMENT_BANK_CATEGORIES])
+        .order('name');
+
+      if (error) throw error;
+
+      setBankDocuments((data || []) as BankDocument[]);
+    } catch (error: any) {
+      console.error('Error fetching bank documents:', error);
+    }
+  };
+
+  const getDocumentOptionsFor = (category: DocumentBankCategory) =>
+    getDocumentOptions(bankDocuments, category);
+
+  const handleDocumentUploaded = (doc: {
+    id: string;
+    name: string;
+    category: DocumentBankCategory;
+  }) => {
+    setBankDocuments((prev) => {
+      if (prev.some((existing) => existing.id === doc.id)) return prev;
+      return [...prev, doc].sort((a, b) => a.name.localeCompare(b.name));
+    });
+  };
+
+  const loadProductForEdit = async (table: string, id: string) => {
+    // sh_products is RLS-restricted; admin client is required to read SimpliHeat catalogue rows.
+    const client = table === 'sh_products' ? supabaseAdmin : supabase;
+    const { data, error } = await client.from(table).select('*').eq('id', id).single();
+    if (error) throw error;
+    return data;
   };
 
   const fetchManufacturers = async () => {
@@ -132,6 +211,9 @@ export function ProductsAdminPage() {
         warrantyYears: b.warranty_years,
         costPrice: b.cost_price,
         rrp: b.rrp,
+        datasheetDocumentId: b.datasheet_document_id || '',
+        userManualDocumentId: b.user_manual_document_id || '',
+        consumerCodeLeafletDocumentId: b.consumer_code_leaflet_document_id || '',
         isActive: b.is_active,
       }));
 
@@ -173,6 +255,9 @@ export function ProductsAdminPage() {
         features: i.features || [],
         costPrice: i.cost_price,
         rrp: i.rrp,
+        datasheetDocumentId: i.datasheet_document_id || '',
+        userManualDocumentId: i.user_manual_document_id || '',
+        consumerCodeLeafletDocumentId: i.consumer_code_leaflet_document_id || '',
         isActive: i.is_active,
       }));
 
@@ -185,24 +270,61 @@ export function ProductsAdminPage() {
     }
   };
 
+  const fetchShProducts = async () => {
+    try {
+      // Centralized SimpliHeat catalogue (ashp / cylinder / radiator). RLS blocks the anon client.
+      const { data, error } = await supabaseAdmin
+        .from('sh_products')
+        .select('*')
+        .in('type', ['ashp', 'cylinder', 'radiator'])
+        .order('brand');
+
+      if (error) throw error;
+
+      const rows = (data || []) as ShProductRow[];
+      const ashps = rows.filter((r) => r.type === 'ashp');
+      setHeatPumps(
+        ashps.map((row) => {
+          const mapped = ashpRowToCatalogue(row);
+          return {
+            id: mapped.id,
+            brand: mapped.brand,
+            model: mapped.model,
+            nominalKw: mapped.nominalKw,
+            outputW35Kw: mapped.outputW35Kw,
+            copW35: mapped.copW35,
+            isActive: mapped.isActive,
+          } satisfies HeatPumpProduct;
+        })
+      );
+      setCylinders(rows.filter((r) => r.type === 'cylinder'));
+      setRadiators(rows.filter((r) => r.type === 'radiator'));
+    } catch (error: any) {
+      console.error('Error fetching SimpliHeat products:', error);
+      toast.error('Failed to load heat pumps, cylinders, and radiators');
+    }
+  };
+
   // === BATTERY CRUD ===
   const handleCreateBattery = async () => {
+    if (!batteryForm.code.trim()) {
+      toast.error('Code is required');
+      return;
+    }
     try {
       setIsLoading(true);
-      const { error } = await supabaseAdmin.from('battery_products').insert([{
-        model: batteryForm.model,
-        manufacturer_id: batteryForm.manufacturerId,
-        capacity_kwh: parseFloat(batteryForm.capacityKwh),
-        power_kw: parseFloat(batteryForm.powerKw),
-        warranty_years: parseInt(batteryForm.warrantyYears),
-        cost_price: parseFloat(batteryForm.costPrice),
-        rrp: parseFloat(batteryForm.rrp),
-        is_active: batteryForm.isActive,
-      }]);
+      const { error } = await supabaseAdmin.from('battery_products').insert([batteryFormToDb(batteryForm)]);
       if (error) throw error;
+      await tagDocumentsProductType(
+        [
+          batteryForm.datasheetDocumentId,
+          batteryForm.userManualDocumentId,
+        ],
+        'battery'
+      );
       await fetchBatteries();
       setIsAddModalOpen(false);
-      resetBatteryForm();
+      setBatteryForm(emptyBatteryForm());
       toast.success('Battery added successfully!');
     } catch (error: any) {
       toast.error(error.message || 'Failed to add battery');
@@ -215,21 +337,22 @@ export function ProductsAdminPage() {
     if (!itemToEdit) return;
     try {
       setIsLoading(true);
-      const { error } = await supabaseAdmin.from('battery_products').update({
-        model: batteryForm.model,
-        manufacturer_id: batteryForm.manufacturerId,
-        capacity_kwh: parseFloat(batteryForm.capacityKwh),
-        power_kw: parseFloat(batteryForm.powerKw),
-        warranty_years: parseInt(batteryForm.warrantyYears),
-        cost_price: parseFloat(batteryForm.costPrice),
-        rrp: parseFloat(batteryForm.rrp),
-        is_active: batteryForm.isActive,
-      }).eq('id', itemToEdit.id);
+      const { error } = await supabaseAdmin
+        .from('battery_products')
+        .update(batteryFormToDb(batteryForm, true))
+        .eq('id', itemToEdit.id);
       if (error) throw error;
+      await tagDocumentsProductType(
+        [
+          batteryForm.datasheetDocumentId,
+          batteryForm.userManualDocumentId,
+        ],
+        'battery'
+      );
       await fetchBatteries();
       setIsEditModalOpen(false);
       setItemToEdit(null);
-      resetBatteryForm();
+      setBatteryForm(emptyBatteryForm());
       toast.success('Battery updated successfully!');
     } catch (error: any) {
       toast.error(error.message || 'Failed to update battery');
@@ -240,22 +363,24 @@ export function ProductsAdminPage() {
 
   // === INVERTER CRUD ===
   const handleCreateInverter = async () => {
+    if (!inverterForm.code.trim()) {
+      toast.error('Code is required');
+      return;
+    }
     try {
       setIsLoading(true);
-      const { error } = await supabaseAdmin.from('inverter_products').insert([{
-        model: inverterForm.model,
-        manufacturer_id: inverterForm.manufacturerId,
-        power_kw: parseFloat(inverterForm.powerKw),
-        phases: parseInt(inverterForm.phases),
-        efficiency: parseFloat(inverterForm.efficiency),
-        cost_price: parseFloat(inverterForm.costPrice),
-        rrp: parseFloat(inverterForm.rrp),
-        is_active: inverterForm.isActive,
-      }]);
+      const { error } = await supabaseAdmin.from('inverter_products').insert([inverterFormToDb(inverterForm)]);
       if (error) throw error;
+      await tagDocumentsProductType(
+        [
+          inverterForm.datasheetDocumentId,
+          inverterForm.userManualDocumentId,
+        ],
+        'inverter'
+      );
       await fetchInverters();
       setIsAddModalOpen(false);
-      resetInverterForm();
+      setInverterForm(emptyInverterForm());
       toast.success('Inverter added successfully!');
     } catch (error: any) {
       toast.error(error.message || 'Failed to add inverter');
@@ -268,24 +393,186 @@ export function ProductsAdminPage() {
     if (!itemToEdit) return;
     try {
       setIsLoading(true);
-      const { error } = await supabaseAdmin.from('inverter_products').update({
-        model: inverterForm.model,
-        manufacturer_id: inverterForm.manufacturerId,
-        power_kw: parseFloat(inverterForm.powerKw),
-        phases: parseInt(inverterForm.phases),
-        efficiency: parseFloat(inverterForm.efficiency),
-        cost_price: parseFloat(inverterForm.costPrice),
-        rrp: parseFloat(inverterForm.rrp),
-        is_active: inverterForm.isActive,
-      }).eq('id', itemToEdit.id);
+      const { error } = await supabaseAdmin
+        .from('inverter_products')
+        .update(inverterFormToDb(inverterForm, true))
+        .eq('id', itemToEdit.id);
       if (error) throw error;
+      await tagDocumentsProductType(
+        [
+          inverterForm.datasheetDocumentId,
+          inverterForm.userManualDocumentId,
+        ],
+        'inverter'
+      );
       await fetchInverters();
       setIsEditModalOpen(false);
       setItemToEdit(null);
-      resetInverterForm();
+      setInverterForm(emptyInverterForm());
       toast.success('Inverter updated successfully!');
     } catch (error: any) {
       toast.error(error.message || 'Failed to update inverter');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // === HEAT PUMP CRUD (sh_products type=ashp) ===
+  const heatPumpFormToAshpPayload = (form: HeatPumpFormState) =>
+    ashpFormToRow({
+      brand: form.brand,
+      model: form.model,
+      nominalKw: form.nominalKw,
+      phases: form.phases,
+      outputW35Kw: form.outputW35Kw,
+      copW35: form.copW35,
+      outputW55Kw: form.outputW55Kw,
+      copW55: form.copW55,
+      minModulationKw: form.minModulationKw,
+      maxOutputKw: form.maxOutputKw,
+      ratedFlowM3h: form.ratedFlowM3h,
+      soundPressure1mDba: form.soundPressure1mDba,
+      weightKg: form.weightKg,
+      dimensionsLwhMm: form.dimensionsLwhMm,
+      r290ChargeKg: form.r290ChargeKg,
+      costPrice: form.costPrice,
+      rrp: form.rrp,
+      isActive: form.isActive,
+    });
+
+  const handleCreateHeatPump = async () => {
+    if (!heatPumpForm.brand.trim() || !heatPumpForm.model.trim()) {
+      toast.error('Brand and model are required');
+      return;
+    }
+    try {
+      setIsLoading(true);
+      const { error } = await supabaseAdmin.from('sh_products').insert([heatPumpFormToAshpPayload(heatPumpForm)]);
+      if (error) throw error;
+      await tagDocumentsProductType(
+        [
+          heatPumpForm.datasheetDocumentId,
+          heatPumpForm.userManualDocumentId,
+        ],
+        'heat_pump'
+      );
+      await fetchShProducts();
+      setIsAddModalOpen(false);
+      setHeatPumpForm(emptyHeatPumpForm());
+      toast.success('Heat pump added successfully!');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to add heat pump');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleUpdateHeatPump = async () => {
+    if (!itemToEdit) return;
+    try {
+      setIsLoading(true);
+      const { error } = await supabaseAdmin
+        .from('sh_products')
+        .update(heatPumpFormToAshpPayload(heatPumpForm))
+        .eq('id', itemToEdit.id);
+      if (error) throw error;
+      await tagDocumentsProductType(
+        [
+          heatPumpForm.datasheetDocumentId,
+          heatPumpForm.userManualDocumentId,
+        ],
+        'heat_pump'
+      );
+      await fetchShProducts();
+      setIsEditModalOpen(false);
+      setItemToEdit(null);
+      setHeatPumpForm(emptyHeatPumpForm());
+      toast.success('Heat pump updated successfully!');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update heat pump');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // === CYLINDER / RADIATOR (sh_products) ===
+  const handleCreateCylinder = async () => {
+    if (!cylinderForm.brand.trim() || !cylinderForm.model.trim()) {
+      toast.error('Brand and model are required');
+      return;
+    }
+    try {
+      setIsLoading(true);
+      const { error } = await supabaseAdmin.from('sh_products').insert([cylinderFormToRow(cylinderForm)]);
+      if (error) throw error;
+      await fetchShProducts();
+      setIsAddModalOpen(false);
+      setCylinderForm(emptyCylinderForm());
+      toast.success('Cylinder added successfully!');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to add cylinder');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleUpdateCylinder = async () => {
+    if (!itemToEdit) return;
+    try {
+      setIsLoading(true);
+      const { error } = await supabaseAdmin
+        .from('sh_products')
+        .update(cylinderFormToRow(cylinderForm))
+        .eq('id', itemToEdit.id);
+      if (error) throw error;
+      await fetchShProducts();
+      setIsEditModalOpen(false);
+      setItemToEdit(null);
+      setCylinderForm(emptyCylinderForm());
+      toast.success('Cylinder updated successfully!');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update cylinder');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCreateRadiator = async () => {
+    if (!radiatorForm.brand.trim() || !radiatorForm.model.trim()) {
+      toast.error('Brand and model are required');
+      return;
+    }
+    try {
+      setIsLoading(true);
+      const { error } = await supabaseAdmin.from('sh_products').insert([radiatorFormToRow(radiatorForm)]);
+      if (error) throw error;
+      await fetchShProducts();
+      setIsAddModalOpen(false);
+      setRadiatorForm(emptyRadiatorForm());
+      toast.success('Radiator added successfully!');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to add radiator');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleUpdateRadiator = async () => {
+    if (!itemToEdit) return;
+    try {
+      setIsLoading(true);
+      const { error } = await supabaseAdmin
+        .from('sh_products')
+        .update(radiatorFormToRow(radiatorForm))
+        .eq('id', itemToEdit.id);
+      if (error) throw error;
+      await fetchShProducts();
+      setIsEditModalOpen(false);
+      setItemToEdit(null);
+      setRadiatorForm(emptyRadiatorForm());
+      toast.success('Radiator updated successfully!');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update radiator');
     } finally {
       setIsLoading(false);
     }
@@ -343,18 +630,29 @@ export function ProductsAdminPage() {
     if (!itemToDelete) return;
     try {
       setIsLoading(true);
-      const table = activeTab === 'batteries' ? 'battery_products' : 
-                    activeTab === 'inverters' ? 'inverter_products' : 'manufacturers';
+      const table =
+        itemToDelete.productType === 'batteries' ? 'battery_products'
+        : itemToDelete.productType === 'inverters' ? 'inverter_products'
+        : itemToDelete.productType === 'heat_pumps' ||
+          itemToDelete.productType === 'cylinders' ||
+          itemToDelete.productType === 'radiators'
+          ? 'sh_products'
+        : 'manufacturers';
       const { error } = await supabaseAdmin.from(table).delete().eq('id', itemToDelete.id);
       if (error) throw error;
-      
-      if (activeTab === 'batteries') await fetchBatteries();
-      else if (activeTab === 'inverters') await fetchInverters();
+
+      if (itemToDelete.productType === 'batteries') await fetchBatteries();
+      else if (itemToDelete.productType === 'inverters') await fetchInverters();
+      else if (
+        itemToDelete.productType === 'heat_pumps' ||
+        itemToDelete.productType === 'cylinders' ||
+        itemToDelete.productType === 'radiators'
+      ) await fetchShProducts();
       else await fetchManufacturers();
 
       setIsDeleteModalOpen(false);
       setItemToDelete(null);
-      toast.success(`${activeTab.slice(0, -1)} deleted successfully!`);
+      toast.success('Deleted successfully!');
     } catch (error: any) {
       toast.error(error.message || 'Failed to delete item');
     } finally {
@@ -362,20 +660,11 @@ export function ProductsAdminPage() {
     }
   };
 
-  // === FORM HELPERS ===
-  const resetBatteryForm = () => {
-    setBatteryForm({
-      model: '', manufacturerId: '', capacityKwh: '', powerKw: '',
-      warrantyYears: '', costPrice: '', rrp: '', isActive: true,
-    });
-  };
-
-  const resetInverterForm = () => {
-    setInverterForm({
-      model: '', manufacturerId: '', powerKw: '', phases: '1',
-      efficiency: '', costPrice: '', rrp: '', isActive: true,
-    });
-  };
+  const resetBatteryForm = () => setBatteryForm(emptyBatteryForm());
+  const resetInverterForm = () => setInverterForm(emptyInverterForm());
+  const resetHeatPumpForm = () => setHeatPumpForm(emptyHeatPumpForm());
+  const resetCylinderForm = () => setCylinderForm(emptyCylinderForm());
+  const resetRadiatorForm = () => setRadiatorForm(emptyRadiatorForm());
 
   const resetManufacturerForm = () => {
     setManufacturerForm({
@@ -384,46 +673,80 @@ export function ProductsAdminPage() {
   };
 
   const handleAddClick = () => {
+    if (pageTab === 'manufacturers') {
+      resetManufacturerForm();
+      setIsAddModalOpen(true);
+      return;
+    }
     resetBatteryForm();
     resetInverterForm();
-    resetManufacturerForm();
+    resetHeatPumpForm();
+    resetCylinderForm();
+    resetRadiatorForm();
+    setModalProductType('batteries');
     setIsAddModalOpen(true);
   };
 
-  const handleEditClick = (item: any) => {
+  const handleEditClick = async (item: any) => {
     setItemToEdit(item);
-    if (activeTab === 'batteries') {
-      setBatteryForm({
-        model: item.model,
-        manufacturerId: item.manufacturerId,
-        capacityKwh: item.capacityKwh.toString(),
-        powerKw: item.powerKw.toString(),
-        warrantyYears: item.warrantyYears.toString(),
-        costPrice: item.costPrice.toString(),
-        rrp: item.rrp.toString(),
-        isActive: item.isActive,
-      });
-    } else if (activeTab === 'inverters') {
-      setInverterForm({
-        model: item.model,
-        manufacturerId: item.manufacturerId,
-        powerKw: item.powerKw.toString(),
-        phases: item.phases.toString(),
-        efficiency: item.efficiency.toString(),
-        costPrice: item.costPrice.toString(),
-        rrp: item.rrp.toString(),
-        isActive: item.isActive,
-      });
-    } else {
-      setManufacturerForm({
-        name: item.name,
-        logo: item.logo || '',
-        website: item.website || '',
-        supportEmail: item.supportEmail || '',
-        isActive: item.isActive,
-      });
+    try {
+      setIsLoading(true);
+      if (item.productType === 'batteries') {
+        const data = await loadProductForEdit('battery_products', item.id);
+        setBatteryForm(batteryFromDb(data));
+        setModalProductType('batteries');
+      } else if (item.productType === 'inverters') {
+        const data = await loadProductForEdit('inverter_products', item.id);
+        setInverterForm(inverterFromDb(data));
+        setModalProductType('inverters');
+      } else if (item.productType === 'heat_pumps') {
+        const data = await loadProductForEdit('sh_products', item.id);
+        const ashp = ashpFromRow(data as ShProductRow);
+        setHeatPumpForm({
+          ...emptyHeatPumpForm(),
+          brand: ashp.brand,
+          model: ashp.model,
+          nominalKw: ashp.nominalKw,
+          phases: ashp.phases,
+          outputW35Kw: ashp.outputW35Kw,
+          copW35: ashp.copW35,
+          outputW55Kw: ashp.outputW55Kw,
+          copW55: ashp.copW55,
+          minModulationKw: ashp.minModulationKw,
+          maxOutputKw: ashp.maxOutputKw,
+          ratedFlowM3h: ashp.ratedFlowM3h,
+          soundPressure1mDba: ashp.soundPressure1mDba,
+          weightKg: ashp.weightKg,
+          dimensionsLwhMm: ashp.dimensionsLwhMm,
+          r290ChargeKg: ashp.r290ChargeKg,
+          costPrice: ashp.costPrice,
+          rrp: ashp.rrp,
+          isActive: ashp.isActive,
+        });
+        setModalProductType('heat_pumps');
+      } else if (item.productType === 'cylinders') {
+        const data = await loadProductForEdit('sh_products', item.id);
+        setCylinderForm(cylinderFromRow(data as ShProductRow));
+        setModalProductType('cylinders');
+      } else if (item.productType === 'radiators') {
+        const data = await loadProductForEdit('sh_products', item.id);
+        setRadiatorForm(radiatorFromRow(data as ShProductRow));
+        setModalProductType('radiators');
+      } else {
+        setManufacturerForm({
+          name: item.name,
+          logo: item.logo || '',
+          website: item.website || '',
+          supportEmail: item.supportEmail || '',
+          isActive: item.isActive,
+        });
+      }
+      setIsEditModalOpen(true);
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to load product');
+    } finally {
+      setIsLoading(false);
     }
-    setIsEditModalOpen(true);
   };
 
   const handleDeleteClick = (item: any) => {
@@ -431,76 +754,157 @@ export function ProductsAdminPage() {
     setIsDeleteModalOpen(true);
   };
 
-  const tabs = [
-    { id: 'batteries', label: 'Batteries', icon: <Battery className="w-4 h-4" />, badge: batteries.length },
-    { id: 'inverters', label: 'Inverters', icon: <Cpu className="w-4 h-4" />, badge: inverters.length },
+  const pageTabs = [
+    {
+      id: 'products',
+      label: 'Products',
+      badge: batteries.length + inverters.length + heatPumps.length + cylinders.length + radiators.length,
+    },
     { id: 'manufacturers', label: 'Manufacturers', badge: manufacturers.length },
   ];
 
-  const filteredBatteries = batteries.filter(b =>
-    b.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    b.manufacturerName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const productTypeTabs = [
+    { id: 'batteries', label: 'Batteries', icon: <Battery className="w-4 h-4" /> },
+    { id: 'inverters', label: 'Inverters', icon: <Cpu className="w-4 h-4" /> },
+    { id: 'heat_pumps', label: 'Heat Pumps', icon: <Flame className="w-4 h-4" /> },
+    { id: 'cylinders', label: 'Cylinders', icon: <Droplets className="w-4 h-4" /> },
+    { id: 'radiators', label: 'Radiators', icon: <Heater className="w-4 h-4" /> },
+  ];
 
-  const filteredInverters = inverters.filter(i =>
-    i.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    i.manufacturerName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  type CatalogueRow = {
+    id: string;
+    productType: 'batteries' | 'inverters' | 'heat_pumps' | 'cylinders' | 'radiators';
+    name: string;
+    brand: string;
+    detail: string;
+    isActive: boolean;
+  };
 
-  const batteryColumns = [
+  const catalogueRows: CatalogueRow[] = [
+    ...batteries.map((b) => ({
+      id: b.id,
+      productType: 'batteries' as const,
+      name: b.model,
+      brand: b.manufacturerName,
+      detail: `${b.capacityKwh ?? '—'} kWh · ${b.powerKw ?? '—'} kW`,
+      isActive: b.isActive,
+    })),
+    ...inverters.map((i) => ({
+      id: i.id,
+      productType: 'inverters' as const,
+      name: i.model,
+      brand: i.manufacturerName,
+      detail: `${i.powerKw ?? '—'} kW · ${i.phases ?? '—'} ph · ${i.efficiency ?? '—'}%`,
+      isActive: i.isActive,
+    })),
+    ...heatPumps.map((h) => ({
+      id: h.id,
+      productType: 'heat_pumps' as const,
+      name: h.model,
+      brand: h.brand || h.manufacturerName || '',
+      detail: `Nominal ${h.nominalKw ?? '—'} kW · W35 ${h.outputW35Kw ?? '—'} / ${h.copW35 ?? '—'}`,
+      isActive: h.isActive,
+    })),
+    ...cylinders.map((c) => {
+      const data = parseShData(c.data);
+      return {
+        id: String(c.id),
+        productType: 'cylinders' as const,
+        name: c.model,
+        brand: c.brand,
+        detail: `${data.litres ?? '—'} L · coil ${data.coil ?? '—'} · ${data.reheat ?? '—'}`,
+        isActive: c.active,
+      };
+    }),
+    ...radiators.map((r) => {
+      const data = parseShData(r.data);
+      return {
+        id: String(r.id),
+        productType: 'radiators' as const,
+        name: r.model,
+        brand: r.brand,
+        detail: `${data.rtype ?? '—'} · n=${data.n ?? '—'}`,
+        isActive: r.active,
+      };
+    }),
+  ];
+
+  const productTypeLabel = (type: CatalogueRow['productType']) =>
+    type === 'batteries' ? 'Battery'
+    : type === 'inverters' ? 'Inverter'
+    : type === 'heat_pumps' ? 'Heat Pump'
+    : type === 'cylinders' ? 'Cylinder'
+    : 'Radiator';
+
+  const platformLabel = (type: CatalogueRow['productType']) =>
+    type === 'batteries' || type === 'inverters' ? 'Helios' : 'SimpliHeat';
+
+  const filteredCatalogue = catalogueRows.filter((row) => {
+    if (listFilter !== 'all' && row.productType !== listFilter) return false;
+    const q = searchTerm.toLowerCase();
+    const platform = platformLabel(row.productType).toLowerCase();
+    return (
+      row.name.toLowerCase().includes(q) ||
+      row.brand.toLowerCase().includes(q) ||
+      row.detail.toLowerCase().includes(q) ||
+      platform.includes(q)
+    );
+  });
+
+  const closeProductModal = () => {
+    setIsAddModalOpen(false);
+    setIsEditModalOpen(false);
+    setItemToEdit(null);
+    resetBatteryForm();
+    resetInverterForm();
+    resetHeatPumpForm();
+    resetCylinderForm();
+    resetRadiatorForm();
+  };
+
+  const catalogueColumns = [
     {
-      key: 'model',
+      key: 'product',
       header: 'Product',
-      render: (battery: BatteryProduct) => (
+      render: (row: CatalogueRow) => (
         <div>
-          <p className="font-medium text-white">{battery.model}</p>
-          <p className="text-sm text-slate-500">{battery.manufacturerName}</p>
+          <p className="font-medium text-white">{row.name}</p>
+          <p className="text-sm text-slate-500">{row.brand || '—'}</p>
         </div>
       ),
     },
     {
-      key: 'capacity',
-      header: 'Capacity',
-      render: (battery: BatteryProduct) => (
-        <span className="text-slate-300">{battery.capacityKwh} kWh</span>
+      key: 'type',
+      header: 'Type',
+      render: (row: CatalogueRow) => (
+        <Badge variant="slate">{productTypeLabel(row.productType)}</Badge>
       ),
     },
     {
-      key: 'power',
-      header: 'Power',
-      render: (battery: BatteryProduct) => (
-        <span className="text-slate-300">{battery.powerKw} kW</span>
-      ),
+      key: 'platform',
+      header: 'Platform',
+      render: (row: CatalogueRow) => {
+        const platform = platformLabel(row.productType);
+        return (
+          <Badge variant={platform === 'Helios' ? 'warning' : 'primary'}>
+            {platform}
+          </Badge>
+        );
+      },
     },
     {
-      key: 'warranty',
-      header: 'Warranty',
-      render: (battery: BatteryProduct) => (
-        <span className="text-slate-300">{battery.warrantyYears} years</span>
-      ),
-    },
-    {
-      key: 'cost',
-      header: 'Cost',
-      align: 'right' as const,
-      render: (battery: BatteryProduct) => (
-        <span className="text-slate-300">£{battery.costPrice.toLocaleString()}</span>
-      ),
-    },
-    {
-      key: 'rrp',
-      header: 'RRP',
-      align: 'right' as const,
-      render: (battery: BatteryProduct) => (
-        <span className="text-white font-medium">£{battery.rrp.toLocaleString()}</span>
+      key: 'detail',
+      header: 'Specs',
+      render: (row: CatalogueRow) => (
+        <span className="text-slate-300 text-sm">{row.detail}</span>
       ),
     },
     {
       key: 'status',
       header: 'Status',
-      render: (battery: BatteryProduct) => (
-        <Badge variant={battery.isActive ? 'success' : 'slate'}>
-          {battery.isActive ? 'Active' : 'Inactive'}
+      render: (row: CatalogueRow) => (
+        <Badge variant={row.isActive ? 'success' : 'slate'}>
+          {row.isActive ? 'Active' : 'Inactive'}
         </Badge>
       ),
     },
@@ -508,16 +912,16 @@ export function ProductsAdminPage() {
       key: 'actions',
       header: '',
       align: 'right' as const,
-      render: (battery: BatteryProduct) => (
+      render: (row: CatalogueRow) => (
         <div className="flex items-center gap-1 justify-end">
-          <button 
-            onClick={() => handleEditClick(battery)}
+          <button
+            onClick={() => handleEditClick(row)}
             className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
           >
             <Edit className="w-4 h-4" />
           </button>
-          <button 
-            onClick={() => handleDeleteClick(battery)}
+          <button
+            onClick={() => handleDeleteClick(row)}
             className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
           >
             <Trash2 className="w-4 h-4" />
@@ -527,139 +931,83 @@ export function ProductsAdminPage() {
     },
   ];
 
-  const inverterColumns = [
-    {
-      key: 'model',
-      header: 'Product',
-      render: (inverter: InverterProduct) => (
-        <div>
-          <p className="font-medium text-white">{inverter.model}</p>
-          <p className="text-sm text-slate-500">{inverter.manufacturerName}</p>
-        </div>
-      ),
-    },
-    {
-      key: 'power',
-      header: 'Power',
-      render: (inverter: InverterProduct) => (
-        <span className="text-slate-300">{inverter.powerKw} kW</span>
-      ),
-    },
-    {
-      key: 'phases',
-      header: 'Phases',
-      render: (inverter: InverterProduct) => (
-        <span className="text-slate-300">{inverter.phases} Phase</span>
-      ),
-    },
-    {
-      key: 'efficiency',
-      header: 'Efficiency',
-      render: (inverter: InverterProduct) => (
-        <span className="text-slate-300">{inverter.efficiency}%</span>
-      ),
-    },
-    {
-      key: 'cost',
-      header: 'Cost',
-      align: 'right' as const,
-      render: (inverter: InverterProduct) => (
-        <span className="text-slate-300">£{inverter.costPrice.toLocaleString()}</span>
-      ),
-    },
-    {
-      key: 'rrp',
-      header: 'RRP',
-      align: 'right' as const,
-      render: (inverter: InverterProduct) => (
-        <span className="text-white font-medium">£{inverter.rrp.toLocaleString()}</span>
-      ),
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (inverter: InverterProduct) => (
-        <Badge variant={inverter.isActive ? 'success' : 'slate'}>
-          {inverter.isActive ? 'Active' : 'Inactive'}
-        </Badge>
-      ),
-    },
-    {
-      key: 'actions',
-      header: '',
-      align: 'right' as const,
-      render: (inverter: InverterProduct) => (
-        <div className="flex items-center gap-1 justify-end">
-          <button 
-            onClick={() => handleEditClick(inverter)}
-            className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
-          >
-            <Edit className="w-4 h-4" />
-          </button>
-          <button 
-            onClick={() => handleDeleteClick(inverter)}
-            className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
-      ),
-    },
-  ];
+  const handleSaveProduct = () => {
+    if (itemToEdit) {
+      if (modalProductType === 'batteries') return handleUpdateBattery();
+      if (modalProductType === 'inverters') return handleUpdateInverter();
+      if (modalProductType === 'heat_pumps') return handleUpdateHeatPump();
+      if (modalProductType === 'cylinders') return handleUpdateCylinder();
+      return handleUpdateRadiator();
+    }
+    if (modalProductType === 'batteries') return handleCreateBattery();
+    if (modalProductType === 'inverters') return handleCreateInverter();
+    if (modalProductType === 'heat_pumps') return handleCreateHeatPump();
+    if (modalProductType === 'cylinders') return handleCreateCylinder();
+    return handleCreateRadiator();
+  };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="page-header mb-0">
           <h1 className="page-title">Product Catalogue</h1>
-          <p className="page-subtitle">Manage batteries, inverters, and manufacturers</p>
+          <p className="page-subtitle">Manage batteries, inverters, heat pumps, cylinders, radiators, and manufacturers</p>
         </div>
-        <Button 
-          leftIcon={<Plus className="w-4 h-4" />}
-          onClick={handleAddClick}
-        >
-          Add Product
+        <Button leftIcon={<Plus className="w-4 h-4" />} onClick={handleAddClick}>
+          {pageTab === 'manufacturers' ? 'Add Manufacturer' : 'Add Product'}
         </Button>
       </div>
 
-      {/* Filters */}
       <Card padding="sm">
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex-1 min-w-[200px] max-w-md">
             <Input
-              placeholder="Search products..."
+              placeholder={pageTab === 'manufacturers' ? 'Search manufacturers...' : 'Search products...'}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               leftIcon={<Search className="w-4 h-4" />}
             />
           </div>
-          <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} variant="pills" />
+          {pageTab === 'products' && (
+            <select
+              value={listFilter}
+              onChange={(e) => setListFilter(e.target.value as typeof listFilter)}
+              className="input w-auto min-w-[160px]"
+            >
+              <option value="all">All types</option>
+              <option value="batteries">Batteries</option>
+              <option value="inverters">Inverters</option>
+              <option value="heat_pumps">Heat Pumps</option>
+              <option value="cylinders">Cylinders</option>
+              <option value="radiators">Radiators</option>
+            </select>
+          )}
+          <Tabs
+            tabs={pageTabs}
+            activeTab={pageTab}
+            onChange={(id) => {
+              setPageTab(id as 'products' | 'manufacturers');
+              setSearchTerm('');
+            }}
+            variant="pills"
+          />
         </div>
       </Card>
 
-      {/* Products Tables */}
-      {activeTab === 'batteries' && (
+      {pageTab === 'products' && (
         <Table
-          columns={batteryColumns}
-          data={filteredBatteries}
-          keyExtractor={(battery) => battery.id}
-          emptyMessage="No batteries found"
+          columns={catalogueColumns}
+          data={filteredCatalogue}
+          keyExtractor={(row) => `${row.productType}-${row.id}`}
+          emptyMessage="No products found"
         />
       )}
 
-      {activeTab === 'inverters' && (
-        <Table
-          columns={inverterColumns}
-          data={filteredInverters}
-          keyExtractor={(inverter) => inverter.id}
-          emptyMessage="No inverters found"
-        />
-      )}
-
-      {activeTab === 'manufacturers' && (
+      {pageTab === 'manufacturers' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {manufacturers.map((mfr, index) => (
+          {manufacturers
+            .filter((m) => m.name.toLowerCase().includes(searchTerm.toLowerCase()))
+            .map((mfr, index) => (
             <motion.div
               key={mfr.id}
               initial={{ opacity: 0, y: 20 }}
@@ -684,14 +1032,14 @@ export function ProductsAdminPage() {
                     </div>
                   </div>
                   <div className="flex gap-1">
-                    <button 
-                      onClick={() => handleEditClick(mfr)}
+                    <button
+                      onClick={() => handleEditClick({ ...mfr, productType: 'manufacturers' })}
                       className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
                     >
                       <Edit className="w-4 h-4" />
                     </button>
-                    <button 
-                      onClick={() => handleDeleteClick(mfr)}
+                    <button
+                      onClick={() => handleDeleteClick({ ...mfr, productType: 'manufacturers' })}
                       className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -716,8 +1064,8 @@ export function ProductsAdminPage() {
                   <div className="flex justify-between">
                     <span className="text-slate-500">Products</span>
                     <span className="text-slate-300">
-                      {batteries.filter(b => b.manufacturerId === mfr.id).length + 
-                       inverters.filter(i => i.manufacturerId === mfr.id).length}
+                      {batteries.filter((b) => b.manufacturerId === mfr.id).length +
+                        inverters.filter((i) => i.manufacturerId === mfr.id).length}
                     </span>
                   </div>
                 </div>
@@ -727,92 +1075,71 @@ export function ProductsAdminPage() {
         </div>
       )}
 
-      {/* Modals - Battery */}
-      {activeTab === 'batteries' && (isAddModalOpen || isEditModalOpen) && (
+      {pageTab === 'products' && (isAddModalOpen || isEditModalOpen) && (
         <Modal
           isOpen={isAddModalOpen || isEditModalOpen}
-          onClose={() => { setIsAddModalOpen(false); setIsEditModalOpen(false); setItemToEdit(null); resetBatteryForm(); }}
-          title={itemToEdit ? 'Edit Battery' : 'Add Battery'}
-          size="lg"
+          onClose={closeProductModal}
+          title={
+            itemToEdit
+              ? `Edit ${productTypeLabel(modalProductType)}`
+              : 'Add Product'
+          }
+          size="xl"
         >
-          <div className="space-y-4">
-            <Select
-              label="Manufacturer"
-              value={batteryForm.manufacturerId}
-              onChange={(e) => setBatteryForm({ ...batteryForm, manufacturerId: e.target.value })}
-              options={manufacturers.map(m => ({ value: m.id, label: m.name }))}
-              required
+          {!itemToEdit && (
+            <div className="mb-6">
+              <Tabs
+                tabs={productTypeTabs}
+                activeTab={modalProductType}
+                onChange={(id) => setModalProductType(id as typeof modalProductType)}
+                variant="pills"
+              />
+            </div>
+          )}
+
+          {modalProductType === 'batteries' && (
+            <BatteryProductFields
+              form={batteryForm}
+              setForm={setBatteryForm}
+              manufacturers={manufacturers}
+              getDocumentOptionsFor={getDocumentOptionsFor}
+              onDocumentUploaded={handleDocumentUploaded}
             />
-            <Input label="Model" value={batteryForm.model} onChange={(e) => setBatteryForm({ ...batteryForm, model: e.target.value })} required />
-            <div className="grid grid-cols-2 gap-4">
-              <Input label="Capacity (kWh)" type="number" step="0.1" value={batteryForm.capacityKwh} onChange={(e) => setBatteryForm({ ...batteryForm, capacityKwh: e.target.value })} required />
-              <Input label="Power (kW)" type="number" step="0.1" value={batteryForm.powerKw} onChange={(e) => setBatteryForm({ ...batteryForm, powerKw: e.target.value })} required />
-            </div>
-            <Input label="Warranty (Years)" type="number" value={batteryForm.warrantyYears} onChange={(e) => setBatteryForm({ ...batteryForm, warrantyYears: e.target.value })} required />
-            <div className="grid grid-cols-2 gap-4">
-              <Input label="Cost Price (£)" type="number" step="0.01" value={batteryForm.costPrice} onChange={(e) => setBatteryForm({ ...batteryForm, costPrice: e.target.value })} required />
-              <Input label="RRP (£)" type="number" step="0.01" value={batteryForm.rrp} onChange={(e) => setBatteryForm({ ...batteryForm, rrp: e.target.value })} required />
-            </div>
-            <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
-              <label className="flex items-center justify-between cursor-pointer">
-                <span className="font-medium text-white">Active</span>
-                <button type="button" onClick={() => setBatteryForm({ ...batteryForm, isActive: !batteryForm.isActive })} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${batteryForm.isActive ? 'bg-green-600' : 'bg-slate-700'}`}>
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${batteryForm.isActive ? 'translate-x-6' : 'translate-x-1'}`} />
-                </button>
-              </label>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <Button variant="secondary" onClick={() => { setIsAddModalOpen(false); setIsEditModalOpen(false); setItemToEdit(null); }} className="flex-1">Cancel</Button>
-              <Button onClick={itemToEdit ? handleUpdateBattery : handleCreateBattery} className="flex-1" isLoading={isLoading}>{itemToEdit ? 'Update' : 'Create'}</Button>
-            </div>
+          )}
+          {modalProductType === 'inverters' && (
+            <InverterProductFields
+              form={inverterForm}
+              setForm={setInverterForm}
+              manufacturers={manufacturers}
+              getDocumentOptionsFor={getDocumentOptionsFor}
+              onDocumentUploaded={handleDocumentUploaded}
+            />
+          )}
+          {modalProductType === 'heat_pumps' && (
+            <HeatPumpProductFields
+              form={heatPumpForm}
+              setForm={setHeatPumpForm}
+              getDocumentOptionsFor={getDocumentOptionsFor}
+              onDocumentUploaded={handleDocumentUploaded}
+            />
+          )}
+          {modalProductType === 'cylinders' && (
+            <CylinderProductFields form={cylinderForm} setForm={setCylinderForm} />
+          )}
+          {modalProductType === 'radiators' && (
+            <RadiatorProductFields form={radiatorForm} setForm={setRadiatorForm} />
+          )}
+
+          <div className="flex gap-3 mt-6">
+            <Button variant="secondary" onClick={closeProductModal} className="flex-1">Cancel</Button>
+            <Button onClick={handleSaveProduct} className="flex-1" isLoading={isLoading}>
+              {itemToEdit ? 'Update' : 'Save'}
+            </Button>
           </div>
         </Modal>
       )}
 
-      {/* Modals - Inverter */}
-      {activeTab === 'inverters' && (isAddModalOpen || isEditModalOpen) && (
-        <Modal
-          isOpen={isAddModalOpen || isEditModalOpen}
-          onClose={() => { setIsAddModalOpen(false); setIsEditModalOpen(false); setItemToEdit(null); resetInverterForm(); }}
-          title={itemToEdit ? 'Edit Inverter' : 'Add Inverter'}
-          size="lg"
-        >
-          <div className="space-y-4">
-            <Select
-              label="Manufacturer"
-              value={inverterForm.manufacturerId}
-              onChange={(e) => setInverterForm({ ...inverterForm, manufacturerId: e.target.value })}
-              options={manufacturers.map(m => ({ value: m.id, label: m.name }))}
-              required
-            />
-            <Input label="Model" value={inverterForm.model} onChange={(e) => setInverterForm({ ...inverterForm, model: e.target.value })} required />
-            <div className="grid grid-cols-3 gap-4">
-              <Input label="Power (kW)" type="number" step="0.1" value={inverterForm.powerKw} onChange={(e) => setInverterForm({ ...inverterForm, powerKw: e.target.value })} required />
-              <Select label="Phases" value={inverterForm.phases} onChange={(e) => setInverterForm({ ...inverterForm, phases: e.target.value })} options={[{ value: '1', label: '1 Phase' }, { value: '3', label: '3 Phase' }]} />
-              <Input label="Efficiency (%)" type="number" step="0.01" value={inverterForm.efficiency} onChange={(e) => setInverterForm({ ...inverterForm, efficiency: e.target.value })} required />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Input label="Cost Price (£)" type="number" step="0.01" value={inverterForm.costPrice} onChange={(e) => setInverterForm({ ...inverterForm, costPrice: e.target.value })} required />
-              <Input label="RRP (£)" type="number" step="0.01" value={inverterForm.rrp} onChange={(e) => setInverterForm({ ...inverterForm, rrp: e.target.value })} required />
-            </div>
-            <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
-              <label className="flex items-center justify-between cursor-pointer">
-                <span className="font-medium text-white">Active</span>
-                <button type="button" onClick={() => setInverterForm({ ...inverterForm, isActive: !inverterForm.isActive })} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${inverterForm.isActive ? 'bg-green-600' : 'bg-slate-700'}`}>
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${inverterForm.isActive ? 'translate-x-6' : 'translate-x-1'}`} />
-                </button>
-              </label>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <Button variant="secondary" onClick={() => { setIsAddModalOpen(false); setIsEditModalOpen(false); setItemToEdit(null); }} className="flex-1">Cancel</Button>
-              <Button onClick={itemToEdit ? handleUpdateInverter : handleCreateInverter} className="flex-1" isLoading={isLoading}>{itemToEdit ? 'Update' : 'Create'}</Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* Modals - Manufacturer */}
-      {activeTab === 'manufacturers' && (isAddModalOpen || isEditModalOpen) && (
+      {pageTab === 'manufacturers' && (isAddModalOpen || isEditModalOpen) && (
         <Modal
           isOpen={isAddModalOpen || isEditModalOpen}
           onClose={() => { setIsAddModalOpen(false); setIsEditModalOpen(false); setItemToEdit(null); resetManufacturerForm(); }}
@@ -833,18 +1160,17 @@ export function ProductsAdminPage() {
               </label>
             </div>
             <div className="flex gap-3 mt-6">
-              <Button variant="secondary" onClick={() => { setIsAddModalOpen(false); setIsEditModalOpen(false); setItemToEdit(null); }} className="flex-1">Cancel</Button>
+              <Button variant="secondary" onClick={() => { setIsAddModalOpen(false); setIsEditModalOpen(false); setItemToEdit(null); resetManufacturerForm(); }} className="flex-1">Cancel</Button>
               <Button onClick={itemToEdit ? handleUpdateManufacturer : handleCreateManufacturer} className="flex-1" isLoading={isLoading}>{itemToEdit ? 'Update' : 'Create'}</Button>
             </div>
           </div>
         </Modal>
       )}
 
-      {/* Delete Confirmation Modal */}
       <Modal
         isOpen={isDeleteModalOpen}
         onClose={() => { setIsDeleteModalOpen(false); setItemToDelete(null); }}
-        title={`Delete ${activeTab.slice(0, -1).charAt(0).toUpperCase() + activeTab.slice(1, -1)}`}
+        title="Delete item"
         size="sm"
       >
         <div className="space-y-4">
@@ -852,7 +1178,7 @@ export function ProductsAdminPage() {
             <XCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
             <div className="flex-1">
               <p className="text-sm font-medium text-white mb-1">Are you sure you want to delete this item?</p>
-              <p className="text-sm text-slate-400">This action cannot be undone. {activeTab === 'batteries' || activeTab === 'inverters' ? 'Product' : 'Manufacturer'}: <span className="font-medium text-white">{itemToDelete?.model || itemToDelete?.name}</span></p>
+              <p className="text-sm text-slate-400">This action cannot be undone. Item: <span className="font-medium text-white">{itemToDelete?.name || itemToDelete?.model}</span></p>
             </div>
           </div>
           <div className="flex gap-3">
