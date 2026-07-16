@@ -179,7 +179,7 @@ export function CommissioningUploadPage() {
   };
 
   const handleUpload = async () => {
-    if (!uploadForm.file || !user || !quote) {
+    if (!uploadForm.file || !user || !quote || !jobId) {
       toast.error('Please select a file');
       return;
     }
